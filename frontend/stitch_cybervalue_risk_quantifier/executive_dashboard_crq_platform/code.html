@@ -1,0 +1,387 @@
+<!DOCTYPE html><html class="light" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>CRQ Platform - Executive Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&amp;family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@500&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@100..900&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#000000",
+                        "inverse-primary": "#bec6e0",
+                        "on-primary-fixed": "#131b2e",
+                        "on-secondary": "#ffffff",
+                        "primary-fixed-dim": "#bec6e0",
+                        "surface-dim": "#d8dadc",
+                        "surface": "#f7f9fb",
+                        "tertiary-fixed": "#fcdeb5",
+                        "on-surface": "#191c1e",
+                        "tertiary": "#000000",
+                        "tertiary-container": "#271901",
+                        "outline-variant": "#c6c6cd",
+                        "error": "#ba1a1a",
+                        "surface-bright": "#f7f9fb",
+                        "on-surface-variant": "#45464d",
+                        "outline": "#76777d",
+                        "on-error": "#ffffff",
+                        "background": "#f7f9fb",
+                        "on-tertiary-container": "#98805d",
+                        "secondary": "#515f74",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-container": "#131b2e",
+                        "surface-container-low": "#f2f4f6",
+                        "on-tertiary-fixed": "#271901",
+                        "on-background": "#191c1e",
+                        "surface-container": "#eceef0",
+                        "secondary-fixed": "#d5e3fd",
+                        "surface-container-highest": "#e0e3e5",
+                        "surface-container-high": "#e6e8ea",
+                        "on-primary": "#ffffff",
+                        "primary-fixed": "#dae2fd",
+                        "surface-tint": "#565e74",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "on-secondary-fixed": "#0d1c2f",
+                        "on-secondary-fixed-variant": "#3a485c",
+                        "secondary-container": "#d5e3fd",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "on-primary-container": "#7c839b",
+                        "error-container": "#ffdad6",
+                        "surface-variant": "#e0e3e5",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "inverse-on-surface": "#eff1f3",
+                        "secondary-fixed-dim": "#b9c7e0",
+                        "on-error-container": "#93000a",
+                        "inverse-surface": "#2d3133",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-container": "#57657b"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "stack-sm": "8px",
+                        "gutter": "24px",
+                        "stack-lg": "32px",
+                        "container-padding": "32px",
+                        "stack-md": "16px",
+                        "unit": "4px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Inter"],
+                        "headline-sm": ["Hanken Grotesk"],
+                        "headline-md": ["Hanken Grotesk"],
+                        "data-mono": ["JetBrains Mono"],
+                        "body-sm": ["Inter"],
+                        "title-lg": ["Inter"],
+                        "label-caps": ["Inter"],
+                        "display-lg": ["Hanken Grotesk"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-sm": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "headline-md": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "data-mono": ["14px", { "lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "title-lg": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700" }],
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .fill-icon {
+            font-variation-settings: 'FILL' 1;
+        }
+        
+        /* Minimalist Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<nav class="bg-surface dark:bg-inverse-surface border-b border-outline-variant dark:border-outline docked full-width top-0 z-50">
+<div class="flex justify-between items-center w-full px-container-padding max-w-[1440px] mx-auto h-16">
+<div class="flex items-center gap-gutter">
+<span class="font-headline-sm text-headline-sm font-bold text-primary dark:text-inverse-primary tracking-tight">CRQ Platform</span>
+<!-- Desktop Nav -->
+<div class="hidden md:flex gap-stack-md ml-stack-lg">
+<a class="text-primary dark:text-primary-fixed border-b-2 border-primary pb-1 font-bold" href="#">Dashboard</a>
+<a class="text-on-surface-variant dark:text-surface-variant hover:text-primary transition-colors py-1" href="#">Analyze</a>
+<a class="text-on-surface-variant dark:text-surface-variant hover:text-primary transition-colors py-1" href="#">Optimize</a>
+<a class="text-on-surface-variant dark:text-surface-variant hover:text-primary transition-colors py-1" href="#">Ingest &amp; Train</a>
+<a class="text-on-surface-variant dark:text-surface-variant hover:text-primary transition-colors py-1" href="#">Reports</a>
+</div>
+</div>
+<div class="flex items-center gap-stack-md">
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">search</span></button>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">help</span></button>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">settings</span></button>
+<div class="w-8 h-8 rounded-full bg-surface-variant overflow-hidden border border-outline-variant ml-2">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="A professional headshot of a corporate executive in a modern office setting. Light mode aesthetic, bright, high key lighting, crisp focus. Soft gray background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAC93YQQAb6_mPCcL0xS7VsO6k1um5wx1WcfYdlqwFufL5n4rRrFRGN8nRW8FqQlpxhXQbCLi317DOn09gFsNmQJJCromPSWQaDpl_sp8HG-mllU_Sd-RHFbNHwyPy02ohVNfTWwSilvB3qL5YnuGTw0bd9ftYWAOdvvrox_QcjjqC-53Fhs81jY7-6K03IMoI2IoBuuoHNaQ_d_AIEioAjjVr-QyrmwEAza66936YZqrNbTUH7-ZiKRg">
+</div>
+</div>
+</div>
+</nav>
+<div class="flex flex-1 max-w-[1440px] mx-auto w-full">
+<!-- SideNavBar (Hidden on Mobile) -->
+<aside class="hidden md:flex flex-col bg-surface-container-low dark:bg-surface-container-lowest border-r border-outline-variant dark:border-outline docked full-height left-0 w-64 flex-shrink-0">
+<div class="py-stack-lg px-gutter h-full flex flex-col">
+<div class="mb-stack-lg flex items-center gap-stack-sm">
+<div class="w-10 h-10 rounded bg-primary-container text-on-primary-container flex items-center justify-center font-headline-sm">EP</div>
+<div>
+<h2 class="font-title-lg text-title-lg leading-tight">Executive Portal</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Risk Management</p>
+</div>
+</div>
+<button class="w-full bg-primary text-on-primary font-body-sm text-body-sm py-2 px-4 rounded font-semibold mb-stack-lg hover:bg-opacity-90 transition-opacity">
+                    + New Analysis
+                </button>
+<nav class="flex flex-col gap-unit flex-1">
+<a class="flex items-center gap-stack-sm px-3 py-2 bg-secondary-container dark:bg-secondary text-on-secondary-container dark:text-on-secondary rounded-lg font-label-caps text-label-caps transition-transform duration-150 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[18px]">dashboard</span> Overview
+                    </a>
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps transition-transform duration-150 active:scale-95 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">trending_up</span> Investment
+                    </a>
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps transition-transform duration-150 active:scale-95 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">input</span> Ingestion
+                    </a>
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps transition-transform duration-150 active:scale-95 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">model_training</span> Training
+                    </a>
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps transition-transform duration-150 active:scale-95 rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">assessment</span> Reports
+                    </a>
+</nav>
+<div class="mt-auto flex flex-col gap-unit pt-stack-md border-t border-outline-variant">
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">help_outline</span> Support
+                    </a>
+<a class="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant dark:text-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg" href="#">
+<span class="material-symbols-outlined text-[18px]">description</span> Documentation
+                    </a>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 p-container-padding bg-background overflow-y-auto">
+<div class="mb-stack-lg flex justify-between items-end">
+<div>
+<h1 class="font-headline-md text-headline-md text-primary mb-1">Portfolio Risk Overview</h1>
+<p class="font-body-md text-body-md text-on-surface-variant">Real-time quantification of cyber exposure vs. security investment.</p>
+</div>
+<div class="flex items-center gap-stack-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">FY 2024</span>
+<button class="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span> Export Report
+                     </button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-gutter mb-stack-lg">
+<!-- Centerpiece: ALE -->
+<div class="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between hover:border-primary transition-colors">
+<div>
+<div class="flex justify-between items-start mb-stack-sm">
+<h3 class="font-title-lg text-title-lg text-primary">Annualized Loss Expectancy</h3>
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[20px]">info</span></button>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Projected financial impact based on current control posture.</p>
+</div>
+<div>
+<div class="flex items-baseline gap-2">
+<span class="font-display-lg text-display-lg text-primary tracking-tighter">₹4.28</span>
+<span class="font-headline-sm text-headline-sm text-on-surface-variant">Cr</span>
+</div>
+<div class="flex items-center gap-1 mt-2 text-error">
+<span class="material-symbols-outlined text-[16px]">trending_up</span>
+<span class="font-data-mono text-data-mono">+4.2% YoY</span>
+</div>
+</div>
+</div>
+<!-- Scorecards -->
+<div class="col-span-12 lg:col-span-3 flex flex-col gap-gutter">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary transition-colors">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
+<div class="font-headline-md text-headline-md text-primary font-data-mono">₹12.5 Cr</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary transition-colors">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant mb-1">Overall ROI of Spend</h4>
+<div class="font-headline-md text-headline-md text-[#15803d] font-data-mono flex items-center"><span class="material-symbols-outlined mr-1">arrow_upward</span>18%</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm mt-1">Security efficiency</div>
+</div>
+</div>
+<!-- Loss Distribution Chart -->
+<div class="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col hover:border-primary transition-colors">
+<h3 class="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
+<div class="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
+<!-- Abstract representation of a chart using Tailwind -->
+<div class="w-full h-32 flex items-end gap-1 px-4 relative z-10">
+<div class="w-1/12 bg-primary opacity-10 h-[10%]"></div>
+<div class="w-1/12 bg-primary opacity-20 h-[30%]"></div>
+<div class="w-1/12 bg-primary opacity-40 h-[60%]"></div>
+<div class="w-1/12 bg-primary opacity-60 h-[90%]"></div>
+<div class="w-1/12 bg-primary opacity-80 h-[100%]"></div>
+<div class="w-1/12 bg-primary opacity-60 h-[75%]"></div>
+<div class="w-1/12 bg-primary opacity-40 h-[45%]"></div>
+<div class="w-1/12 bg-primary opacity-20 h-[25%]"></div>
+<div class="w-1/12 bg-[#ba1a1a] opacity-40 h-[15%]"></div>
+<div class="w-1/12 bg-[#ba1a1a] opacity-20 h-[10%]"></div>
+<div class="w-1/12 bg-[#ba1a1a] opacity-10 h-[5%]"></div>
+</div>
+<div class="absolute bottom-0 w-full h-[1px] bg-outline-variant"></div>
+<div class="absolute right-8 top-4 flex flex-col items-end">
+<span class="font-label-caps text-label-caps text-[#ba1a1a]">VaR Line</span>
+<div class="w-[1px] h-24 bg-[#ba1a1a] border-r border-dashed border-[#ba1a1a] mt-1"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Row: Sandbox & Breakdown -->
+<div class="grid grid-cols-12 gap-gutter">
+<!-- What-If Sandbox -->
+<div class="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary transition-colors">
+<div class="flex justify-between items-center mb-stack-lg">
+<h3 class="font-title-lg text-title-lg text-primary">Simulation Sandbox</h3>
+<span class="bg-secondary-container text-on-secondary-container px-2 py-1 rounded font-label-caps text-label-caps">Draft Mode</span>
+</div>
+<div class="space-y-stack-lg">
+<!-- Budget Slider -->
+<div>
+<div class="flex justify-between mb-2">
+<label class="font-body-sm text-body-sm font-semibold">Security Budget Allocation</label>
+<span class="font-data-mono text-data-mono font-bold">₹8.5 Cr</span>
+</div>
+<input class="w-full h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="65">
+<div class="flex justify-between mt-1 text-on-surface-variant font-label-caps text-label-caps">
+<span class="">₹0</span>
+<span class="">₹15 Cr+</span>
+</div>
+</div>
+<hr class="border-outline-variant border-dashed">
+<!-- Strategic Controls -->
+<div>
+<h4 class="font-body-sm text-body-sm font-semibold mb-stack-md">Strategic Controls</h4>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-stack-md">
+<div class="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-medium">Enforce Cloud MFA</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹45L</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value="">
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-medium">Patch Payment Gateway</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹1.2 Cr</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox" value="">
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-medium">Zero Trust Architecture</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹3.5 Cr</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox" value="">
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+</div>
+</div>
+<button class="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 transition-opacity">
+                            Run Simulation
+                        </button>
+</div>
+</div>
+<!-- Strategic Breakdown -->
+<div class="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary transition-colors">
+<h3 class="font-title-lg text-title-lg text-primary mb-stack-lg">Risk by Business Unit</h3>
+<div class="space-y-4">
+<!-- Unit 1 -->
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="font-body-sm text-body-sm font-medium">Payment Processing</span>
+<span class="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button class="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors">Accept Risk</button>
+</div>
+<div class="w-full bg-surface-container h-2 rounded overflow-hidden">
+<div class="bg-error h-2 rounded" style="width: 45%"></div>
+</div>
+</div>
+<!-- Unit 2 -->
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="font-body-sm text-body-sm font-medium">Retail Operations</span>
+<span class="font-data-mono text-data-mono font-bold">₹1.2 Cr/yr</span>
+</div>
+<div class="w-full bg-surface-container h-2 rounded overflow-hidden">
+<div class="bg-[#ca8a04] h-2 rounded" style="width: 28%"></div>
+</div>
+</div>
+<!-- Unit 3 -->
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="font-body-sm text-body-sm font-medium">Corporate IT</span>
+<span class="font-data-mono text-data-mono font-bold">₹0.68 Cr/yr</span>
+</div>
+<div class="w-full bg-surface-container h-2 rounded overflow-hidden">
+<div class="bg-[#eab308] h-2 rounded" style="width: 15%"></div>
+</div>
+</div>
+<!-- Unit 4 -->
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="font-body-sm text-body-sm font-medium">Supply Chain</span>
+<span class="font-data-mono text-data-mono font-bold">₹0.40 Cr/yr</span>
+</div>
+<div class="w-full bg-surface-container h-2 rounded overflow-hidden">
+<div class="bg-primary-container h-2 rounded" style="width: 12%"></div>
+</div>
+</div>
+</div>
+<button class="mt-stack-lg text-primary font-body-sm text-body-sm font-semibold flex items-center gap-1 hover:underline">
+                        View Detailed Ledger <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</main>
+</div>
+<!-- Footer -->
+<footer class="bg-surface dark:bg-surface-dim border-t border-outline-variant dark:border-outline docked full-width bottom-0 z-40">
+<div class="flex flex-col md:flex-row justify-between items-center w-full px-container-padding py-stack-md max-w-[1440px] mx-auto gap-stack-sm">
+<span class="font-label-caps text-label-caps text-on-surface-variant">© 2024 CRQ Executive Minimalist. All rights reserved.</span>
+<div class="flex gap-gutter font-body-sm text-body-sm text-on-surface-variant">
+<a class="hover:text-primary transition-colors cursor-pointer" href="#">Contextual Help</a>
+<a class="hover:text-primary transition-colors cursor-pointer" href="#">Privacy Policy</a>
+<a class="hover:text-primary transition-colors cursor-pointer" href="#">Security Standards</a>
+<a class="hover:text-primary transition-colors cursor-pointer" href="#">API Documentation</a>
+</div>
+</div>
+</footer>
+
+
+<button class="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" aria-label="AI Assistant"><span class="material-symbols-outlined text-[28px] fill-icon">auto_awesome</span></button></body></html>

@@ -1,0 +1,27 @@
+# Node.js / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/.swc/
+frontend/out/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.env
+.venv
+
+# Database
+*.sqlite3
+crq_db.sqlite3
+
+# Vector DB
+ai-agent/chroma_data/
+
+# OS
+.DS_Store
+Thumbs.db
