@@ -5,6 +5,15 @@ frontend/.swc/
 frontend/out/
 npm-debug.log*
 
+# Hardhat (blockchain) - node_modules and compiler build output, both
+# regenerated locally by `npm install` + `npx hardhat compile`/`deploy`
+blockchain/node_modules/
+blockchain/artifacts/
+blockchain/cache/
+
+# Editor/tool backup files
+*.bak
+
 # Python
 __pycache__/
 *.py[cod]

@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from '@/context/AuthContext';
 
 export default function ExecutiveDashboard() {
+    const { token } = useAuth();
     const [budget, setBudget] = useState(65);
     const [simResults, setSimResults] = useState<any>(null);
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -30,6 +32,35 @@ export default function ExecutiveDashboard() {
         } catch (e) {
             console.error(e);
             alert("Error running simulation. Ensure FastAPI is running on port 8000.");
+        }
+    };
+
+    const acceptRisk = async (label: string, riskAmountRupees: number) => {
+        if (!token) {
+            alert('Please log in first (top-right corner) before accepting risk.');
+            return;
+        }
+        try {
+            const res = await fetch('http://localhost:8000/api/audit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    action: `Accept residual risk: ${label}`,
+                    risk_accepted: riskAmountRupees,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(`Could not log audit: ${data.detail || res.status}`);
+                return;
+            }
+            alert(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id}\nDecided by: ${data.decided_by}`);
+        } catch (e) {
+            console.error(e);
+            alert('Error contacting backend. Is it running on port 8000?');
         }
     };
 
@@ -230,7 +261,7 @@ export default function ExecutiveDashboard() {
 <div>
 <div className="flex justify-between items-end mb-1">
 <span className="font-body-sm text-body-sm font-medium">Payment Processing</span>
-<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors">Accept Risk</button>
+<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button onClick={() => acceptRisk('Payment Processing', 20000000)} className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors">Accept Risk</button>
 </div>
 <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
 <div className="bg-error h-2 rounded" style={{width: "45%"}}></div>

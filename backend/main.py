@@ -40,7 +40,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from . import generators, models
+from . import blockchain_client, generators, models
 from .database import get_db, init_db
 from .security import authenticate_demo_user, create_access_token, get_current_user
 
@@ -263,15 +263,25 @@ async def chat(request: ChatRequest):
         try:
             async for event in ai_graph.app.astream_events(initial_state, version="v1"):
                 kind = event["event"]
+                data = event.get("data") or {}
                 if kind == "on_chat_model_stream":
-                    content = event["data"]["chunk"].content
+                    chunk = data.get("chunk")
+                    content = getattr(chunk, "content", None) if chunk is not None else None
                     if content:
                         has_yielded = True
                         yield content
                 elif kind == "on_chain_end":
-                    if event["name"] in ["security_analyst", "compliance_officer", "quant_analyst"]:
-                        msgs = event["data"].get("output", {}).get("messages", [])
-                        if msgs and not os.environ.get("OPENAI_API_KEY"):
+                    if event["name"] in ["security_analyst", "compliance_officer", "quant_analyst", "supervisor"]:
+                        output = data.get("output") or {}
+                        msgs = output.get("messages", []) if isinstance(output, dict) else []
+                        # Only send the sub-agent's full final answer if we
+                        # have not already streamed anything for this turn
+                        # via on_chat_model_stream above - avoids showing
+                        # nothing when token-level streaming doesn't
+                        # surface through astream_events (which is what
+                        # was happening here), while avoiding a duplicate
+                        # answer when it does.
+                        if msgs and not has_yielded:
                             has_yielded = True
                             yield msgs[-1].content
                 elif kind == "on_tool_start":
@@ -291,10 +301,20 @@ async def chat(request: ChatRequest):
 
 def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id: int):
     """
-    Mock function to simulate an async webhook to the Hardhat local EVM.
+    Commits the risk-acceptance decision to the AuditLedger smart contract
+    on a local Hardhat chain, if one is running and the contract has been
+    deployed (see blockchain_client.py for how to start it). Falls back to
+    a print()-only mock otherwise, so this endpoint keeps working for
+    anyone who isn't running Hardhat locally.
     """
-    print(f"\n[BLOCKCHAIN AUDIT LOG] Successfully committed to AuditLedger.sol!")
-    print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
+    data_hash = f"decision:{decision_id}|risk:{risk}"
+    tx_hash = blockchain_client.log_risk_acceptance(action=action, data_hash=data_hash, user=user)
+    if tx_hash:
+        print(f"\n[BLOCKCHAIN AUDIT LOG] Committed on-chain to AuditLedger.sol. Tx hash: {tx_hash}")
+        print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
+    else:
+        print(f"\n[BLOCKCHAIN AUDIT LOG] (mock - no local Hardhat chain reachable) Would commit to AuditLedger.sol!")
+        print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
 
 
 @app.post("/api/audit")

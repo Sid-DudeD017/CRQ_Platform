@@ -1,12 +1,25 @@
 from typing import Annotated, Sequence, TypedDict, Literal
 import operator
 import os
+
+from dotenv import load_dotenv
+# Load ai-agent/.env explicitly (not just python-dotenv's default cwd
+# lookup) since this module gets imported via a sys.path hack from
+# backend/main.py, which is normally launched from the repo root, not
+# from inside ai-agent/.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
+
+try:
+    from langchain_groq import ChatGroq
+except ImportError:
+    ChatGroq = None
 
 # Import local tools and RAG
 from tools import optimize_budget, run_monte_carlo_var, query_telemetry
@@ -16,8 +29,14 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     next_agent: str
 
+# Prefer Groq (fast, free tier) if a key is set, fall back to OpenAI if
+# that's what's configured instead. Either way `llm` stays None (and the
+# graph falls back to keyword-based routing / canned responses) if neither
+# key is present.
 llm = None
-if os.environ.get("OPENAI_API_KEY"):
+if os.environ.get("GROQ_API_KEY") and ChatGroq:
+    llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
+elif os.environ.get("OPENAI_API_KEY"):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 # Create Sub-Agents using create_react_agent
@@ -29,19 +48,19 @@ if llm:
     security_agent = create_react_agent(
         llm, 
         tools=[query_telemetry],
-        state_modifier="You are a Security Analyst. Query telemetry and EDR logs to answer network topology and risk questions."
+        prompt="You are a Security Analyst. Query telemetry and EDR logs to answer network topology and risk questions."
     )
     
     compliance_agent = create_react_agent(
         llm,
         tools=[search_compliance_frameworks],
-        state_modifier="You are a Compliance Officer. Use RAG to answer queries about RBI, SEBI, NIST, and DPDP frameworks."
+        prompt="You are a Compliance Officer. Use RAG to answer queries about RBI, SEBI, NIST, and DPDP frameworks."
     )
     
     quant_agent = create_react_agent(
         llm,
         tools=[optimize_budget, run_monte_carlo_var],
-        state_modifier="You are a Quant Analyst. Run budget optimization and VaR monte carlo simulations."
+        prompt="You are a Quant Analyst. Run budget optimization and VaR monte carlo simulations."
     )
 
 def security_analyst_node(state: AgentState):
@@ -65,13 +84,44 @@ def quant_analyst_node(state: AgentState):
 class Route(BaseModel):
     next_agent: Literal["security_analyst", "compliance_officer", "quant_analyst", "FINISH"] = Field(...)
 
+def _general_chat_reply(last_message: str):
+    """
+    Used when the supervisor decides this isn't a specialist question
+    (compliance / budget / telemetry). Previously this just returned a
+    single hardcoded sentence for literally every such message - "tell me
+    about this webpage" and "what can you do" got the exact same canned
+    reply, which is why the assistant felt useless for anything but the
+    three specialist topics. Now it actually asks the LLM to answer
+    directly, same as a normal chatbot would.
+    """
+    if not llm:
+        return None
+    try:
+        general_prompt = ChatPromptTemplate.from_messages([
+            ("system",
+             "You are the Virtual CISO for a Cyber Risk Quantification (CRQ) platform. "
+             "Answer the user's question directly and conversationally in 2-4 sentences. "
+             "You can go deep on network telemetry/EDR status, RBI/SEBI/NIST/DPDP compliance, "
+             "or budget optimization/FAIR Monte Carlo risk simulation if the user asks about "
+             "those - but for anything else (small talk, general questions, questions about "
+             "this dashboard itself), just answer normally and helpfully like any assistant would."),
+            ("user", "{input}"),
+        ])
+        reply = (general_prompt | llm).invoke({"input": last_message})
+        return reply.content
+    except Exception as e:
+        print(f"General chat LLM call failed: {e}")
+        return None
+
+
 def virtual_ciso_supervisor(state: AgentState):
     messages = state.get("messages", [])
     if not messages:
         return {"next_agent": "FINISH"}
-        
+
     last_message = messages[-1].content
-    
+    route_decision = "FINISH"
+
     if llm:
         try:
             structured_llm = llm.with_structured_output(Route)
@@ -80,7 +130,7 @@ def virtual_ciso_supervisor(state: AgentState):
                 "- security_analyst: for network telemetry, EDR logs, active vulnerabilities.\n"
                 "- compliance_officer: for RBI, SEBI, NIST, DPDP regulations and frameworks.\n"
                 "- quant_analyst: for budget optimization, VaR, FAIR Monte Carlo modeling.\n"
-                "- FINISH: if the user is just chatting or the task is complete."
+                "- FINISH: if the user is just chatting, asking something general, or the task is complete."
             )
             prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
@@ -88,21 +138,32 @@ def virtual_ciso_supervisor(state: AgentState):
             ])
             chain = prompt | structured_llm
             result = chain.invoke({"input": last_message})
-            return {"next_agent": result.next_agent}
+            route_decision = result.next_agent
         except Exception as e:
             print(f"LLM routing failed: {e}")
-            pass
-            
-    # Fallback routing
-    last_message_lower = last_message.lower()
-    if any(k in last_message_lower for k in ["compliance", "rbi", "sebi", "nist", "dpdp"]):
-        return {"next_agent": "compliance_officer"}
-    elif any(k in last_message_lower for k in ["budget", "optimize", "var", "monte carlo"]):
-        return {"next_agent": "quant_analyst"}
-    elif any(k in last_message_lower for k in ["telemetry", "vulnerability", "edr"]):
-        return {"next_agent": "security_analyst"}
+            last_message_lower = last_message.lower()
+            if any(k in last_message_lower for k in ["compliance", "rbi", "sebi", "nist", "dpdp"]):
+                route_decision = "compliance_officer"
+            elif any(k in last_message_lower for k in ["budget", "optimize", "var", "monte carlo"]):
+                route_decision = "quant_analyst"
+            elif any(k in last_message_lower for k in ["telemetry", "vulnerability", "edr"]):
+                route_decision = "security_analyst"
     else:
-        return {"next_agent": "FINISH"}
+        last_message_lower = last_message.lower()
+        if any(k in last_message_lower for k in ["compliance", "rbi", "sebi", "nist", "dpdp"]):
+            route_decision = "compliance_officer"
+        elif any(k in last_message_lower for k in ["budget", "optimize", "var", "monte carlo"]):
+            route_decision = "quant_analyst"
+        elif any(k in last_message_lower for k in ["telemetry", "vulnerability", "edr"]):
+            route_decision = "security_analyst"
+
+    if route_decision != "FINISH":
+        return {"next_agent": route_decision}
+
+    reply_text = _general_chat_reply(last_message)
+    if reply_text:
+        return {"messages": [AIMessage(content=reply_text)], "next_agent": "FINISH"}
+    return {"next_agent": "FINISH"}
 
 def build_multi_agent_graph():
     workflow = StateGraph(AgentState)
@@ -112,9 +173,16 @@ def build_multi_agent_graph():
     workflow.add_node("compliance_officer", compliance_officer_node)
     workflow.add_node("quant_analyst", quant_analyst_node)
     
-    workflow.add_edge("security_analyst", "supervisor")
-    workflow.add_edge("compliance_officer", "supervisor")
-    workflow.add_edge("quant_analyst", "supervisor")
+    # Each specialist answers once and ends the turn, rather than looping
+    # back through the supervisor - a sub-agent's own answer almost always
+    # contains its own trigger keywords (e.g. the compliance officer's
+    # answer mentions "compliance"), which caused the old routing to send
+    # it right back to itself forever until LangGraph's recursion limit
+    # killed the request. This was masked before because `llm` was always
+    # None (no API key configured), which took a different, shorter path.
+    workflow.add_edge("security_analyst", END)
+    workflow.add_edge("compliance_officer", END)
+    workflow.add_edge("quant_analyst", END)
     
     workflow.add_conditional_edges(
         "supervisor",

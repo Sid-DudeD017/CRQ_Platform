@@ -113,3 +113,5 @@ sqlmodel
 PyJWT
 Faker
 python-multipart
+langchain-groq
+web3

@@ -2,9 +2,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const { token, username, loginAs, logout, loginError } = useAuth();
 
     const navItems = [
         { path: '/', icon: 'dashboard', label: 'Overview' },
@@ -26,6 +28,19 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">search</span></button>
                         <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">help</span></button>
                         <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">settings</span></button>
+                        {username ? (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
+                                <span className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
+                                <span className="text-on-surface">Logged in: {username}</span>
+                                <button onClick={logout} className="text-on-surface-variant hover:text-error underline ml-1">Logout</button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => loginAs('ciso')} className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors">Login as CISO</button>
+                                <button onClick={() => loginAs('cfo')} className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors">Login as CFO</button>
+                                {loginError && <span className="text-error text-label-caps">{loginError}</span>}
+                            </div>
+                        )}
                         <div className="w-8 h-8 rounded-full bg-surface-variant overflow-hidden border border-outline-variant ml-2">
                             <img alt="User profile" className="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAC93YQQAb6_mPCcL0xS7VsO6k1um5wx1WcfYdlqwFufL5n4rRrFRGN8nRW8FqQlpxhXQbCLi317DOn09gFsNmQJJCromPSWQaDpl_sp8HG-mllU_Sd-RHFbNHwyPy02ohVNfTWwSilvB3qL5YnuGTw0bd9ftYWAOdvvrox_QcjjqC-53Fhs81jY7-6K03IMoI2IoBuuoHNaQ_d_AIEioAjjVr-QyrmwEAza66936YZqrNbTUH7-ZiKRg" />
                         </div>
@@ -71,11 +86,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 {/* Main Content Wrapper */}
                 <main className="flex-1 p-container-padding bg-background overflow-y-auto w-full relative">
                     {children}
-                    
-                    {/* Chatbot Button */}
-                    <button className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" aria-label="AI Assistant">
-                        <span className="material-symbols-outlined text-[28px]">auto_awesome</span>
-                    </button>
+                    {/* Note: the floating "AI Assistant" chat button lives inside
+                        page.tsx (the home dashboard), wired to a real chat panel
+                        and the backend. A second, non-functional decorative copy
+                        used to sit here too, stacked exactly on top of it, which
+                        is why clicking the button appeared to do nothing - you
+                        were always clicking this dead one instead of the real
+                        one underneath. Removed rather than duplicated. */}
                 </main>
             </div>
             

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import SharedLayout from "@/components/SharedLayout";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
   title: "CRQ Platform Executive Dashboard",
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <SharedLayout>{children}</SharedLayout>
+        <AuthProvider>
+          <SharedLayout>{children}</SharedLayout>
+        </AuthProvider>
       </body>
     </html>
   );
