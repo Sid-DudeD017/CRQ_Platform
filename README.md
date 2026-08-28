@@ -7,7 +7,7 @@ An AI-Powered Cyber Risk Quantification (CRQ) Platform that bridges enterprise t
 The platform operates as a centralized hub, routing data through a FastAPI backend before feeding it into mathematical and AI models:
 
 - **Frontend (`/frontend`)**: Next.js 14 executive dashboard featuring real-time Recharts for Monte Carlo distributions, budget optimization sliders, and a built-in AI Chat panel.
-- **Backend API (`/backend`)**: FastAPI server acting as the gateway. It manages SQLite/PostgreSQL databases, handles mock telemetry generation, and serves endpoints for the frontend.
+- **Backend API (`/backend`)**: FastAPI server acting as the gateway. It manages SQLite/PostgreSQL databases, handles mock telemetry generation, and serves endpoints for the frontend. `POST /api/audit` (the "Accept Risk" → blockchain trigger) now requires a JWT — see the testing section below.
 - **Quant Engine (`/quant-engine`)**: Calculates Annualized Loss Expectancy (ALE) and Value at Risk (VaR) using FAIR Monte Carlo simulations. It also uses a Knapsack optimizer to recommend budget allocations.
 - **AI Agent (`/ai-agent`)**: A LangGraph-based multi-agent orchestrator ("Virtual CISO"). It dynamically routes queries to sub-agents (Security Analyst, Compliance Officer, Quant Analyst) using RAG (ChromaDB) to fetch regulatory info on NIST, RBI, SEBI, and DPDP.
 - **Blockchain (`/blockchain`)**: Mocked Web3 smart contracts (Solidity) for zero-trust auditing of risk acceptance events.
@@ -89,3 +89,24 @@ Once the platform is running, follow these steps to test the full data pipeline:
    - Click the floating `✨` AI Assistant button in the bottom right corner.
    - Try asking: *"What are the RBI regulations regarding telemetry?"* or *"What is our network topology?"*
    - LangGraph will automatically route your query to the correct specialized sub-agent and stream the answer back.
+
+4. **Accept Risk (now requires login):**
+   `POST /api/audit` — the endpoint the "Accept Risk" button calls — used to accept any request with no authentication at all, meaning anyone could forge a blockchain risk-acceptance entry under any name. It now requires a bearer token, and the acting user comes from that token rather than whatever the client claims. Demo accounts (see `backend/security.py` — swap for real accounts before this is anything but a hackathon demo):
+
+   | username | password |
+   |---|---|
+   | `ciso` | `demo-ciso-pass` |
+   | `cfo` | `demo-cfo-pass` |
+
+   ```bash
+   # 1. Log in, get a token
+   curl -X POST http://localhost:8000/api/auth/login -d "username=ciso&password=demo-ciso-pass"
+
+   # 2. Call /api/audit with it
+   curl -X POST http://localhost:8000/api/audit \
+     -H "Authorization: Bearer <token from step 1>" \
+     -H "Content-Type: application/json" \
+     -d '{"action": "accept_risk", "risk_accepted": 50000}'
+   ```
+
+   **Frontend TODO:** the "Accept Risk" button needs to call `/api/auth/login` (once, e.g. on page load with a hardcoded demo account for now) and attach the resulting token as an `Authorization: Bearer <token>` header on its `/api/audit` call, or that button will start returning `401 Unauthorized`.

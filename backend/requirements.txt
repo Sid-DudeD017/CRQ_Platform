@@ -1,5 +1,9 @@
 fastapi
 uvicorn
 sqlalchemy
+sqlmodel
 psycopg2-binary
 pydantic
+PyJWT
+Faker
+python-multipart
