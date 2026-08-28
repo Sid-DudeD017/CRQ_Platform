@@ -51,13 +51,16 @@ def run_fair_monte_carlo(
     
     # [NEW SEBI MANDATE] Calculate SEBI Cyber Capability Index (CCI)
     # Mapping mathematical FAIR outputs to the 5 Resilience Goals (0-5 scale)
-    cci_anticipate = min(5.0, (100 - np.mean(tef)) / 20)
-    cci_withstand = np.mean(control_str) / 20
-    cci_contain = min(5.0, 5.0 * (10000000 / max(1, np.mean(secondary_loss))))
-    cci_recover = min(5.0, 5.0 * (5000000 / max(1, np.mean(primary_loss))))
+    # Each pillar clamped to [0, 5] - the upper clamp alone let a high TEF
+    # (now common with the blast-radius amplification above) push
+    # cci_anticipate, and therefore the overall score, negative.
+    cci_anticipate = max(0.0, min(5.0, (100 - np.mean(tef)) / 20))
+    cci_withstand = max(0.0, min(5.0, np.mean(control_str) / 20))
+    cci_contain = max(0.0, min(5.0, 5.0 * (10000000 / max(1, np.mean(secondary_loss)))))
+    cci_recover = max(0.0, min(5.0, 5.0 * (5000000 / max(1, np.mean(primary_loss)))))
     
     cci_score = (cci_anticipate + cci_withstand + cci_contain + cci_recover) / 4.0
-    cci_evolve = min(5.0, cci_score * 1.1) # Evolution metric
+    cci_evolve = max(0.0, min(5.0, cci_score * 1.1)) # Evolution metric
     
     sebi_resilience = {
         "cci_score": float(cci_score),
