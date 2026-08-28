@@ -25,18 +25,30 @@ if compliance_collection.count() == 0:
     compliance_collection.add(documents=mock_docs, metadatas=metadatas, ids=ids)
 
 @tool
-def search_compliance_frameworks(query: str, n_results: int = 2) -> str:
+def search_compliance_frameworks(query: str, n_results: int = 3) -> str:
     """
     Searches the RAG pipeline (ChromaDB) for relevant regulatory and compliance information
-    regarding RBI, SEBI, NIST, and DPDP frameworks.
+    regarding RBI, SEBI, NIST, and DPDP frameworks. Each retrieved passage is tagged with
+    which framework it actually came from, so the answer can be traced back to a real
+    source document instead of reading as an unverifiable model claim.
     """
     results = compliance_collection.query(
         query_texts=[query],
         n_results=n_results
     )
-    
+
     if not results or not results.get('documents') or not results['documents'][0]:
         return "No specific compliance guidelines found in the RAG database for this query."
-        
+
     documents = results['documents'][0]
-    return "\n\n".join(documents)
+    metadatas = results.get('metadatas', [[]])[0] or []
+    sources = sorted({m.get('source', 'UNKNOWN') for m in metadatas if m})
+
+    tagged_passages = []
+    for i, doc in enumerate(documents):
+        source = metadatas[i].get('source', 'UNKNOWN') if i < len(metadatas) and metadatas[i] else 'UNKNOWN'
+        tagged_passages.append(f"[Source: {source}] {doc}")
+
+    body = "\n\n".join(tagged_passages)
+    footer = f"\n\n(Retrieved from: {', '.join(sources)}. Always name the specific framework(s) above when answering, and end your answer with a line like \"Sources: RBI, SEBI\" listing exactly which of these were actually used.)"
+    return body + footer

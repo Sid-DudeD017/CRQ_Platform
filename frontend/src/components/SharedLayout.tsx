@@ -1,12 +1,52 @@
 "use client";
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const { token, username, loginAs, logout, loginError } = useAuth();
+    const { theme, toggleTheme } = useTheme();
+
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isNewAnalysisOpen, setIsNewAnalysisOpen] = useState(false);
+    const [analysisLabel, setAnalysisLabel] = useState('');
+    const [analysisBudgetCr, setAnalysisBudgetCr] = useState(10);
+    const [analysisResult, setAnalysisResult] = useState<any>(null);
+    const [analysisLoading, setAnalysisLoading] = useState(false);
+    const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+    const runNewAnalysis = async () => {
+        setAnalysisLoading(true);
+        setAnalysisError(null);
+        setAnalysisResult(null);
+        try {
+            const res = await fetch('http://localhost:8000/api/simulate-risk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ budget: analysisBudgetCr * 10000000, constraints: {} }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.detail || `Request failed (${res.status})`);
+            }
+            setAnalysisResult(data);
+        } catch (e: any) {
+            console.error(e);
+            setAnalysisError(e.message || 'Could not run analysis. Is the backend running on port 8000?');
+        } finally {
+            setAnalysisLoading(false);
+        }
+    };
+
+    const closeNewAnalysis = () => {
+        setIsNewAnalysisOpen(false);
+        setAnalysisResult(null);
+        setAnalysisError(null);
+        setAnalysisLabel('');
+    };
 
     const navItems = [
         { path: '/', icon: 'dashboard', label: 'Overview' },
@@ -25,9 +65,36 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
                     </div>
                     <div className="flex items-center gap-stack-md">
-                        <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">search</span></button>
-                        <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">help</span></button>
-                        <button className="text-on-surface-variant hover:text-primary transition-colors"><span className="material-symbols-outlined">settings</span></button>
+                        <Link href="/support" className="text-on-surface-variant hover:text-primary transition-colors" aria-label="Help">
+                            <span className="material-symbols-outlined">help</span>
+                        </Link>
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsSettingsOpen((v) => !v)}
+                                className="text-on-surface-variant hover:text-primary transition-colors"
+                                aria-label="Settings"
+                            >
+                                <span className="material-symbols-outlined">settings</span>
+                            </button>
+                            {isSettingsOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsSettingsOpen(false)} />
+                                    <div className="absolute right-0 top-10 w-56 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-2xl z-50 p-3 animate-fade-scale-in">
+                                        <div className="flex items-center justify-between px-1 py-1.5">
+                                            <span className="font-body-sm text-body-sm">Dark Mode</span>
+                                            <button
+                                                onClick={toggleTheme}
+                                                role="switch"
+                                                aria-checked={theme === 'dark'}
+                                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-primary' : 'bg-surface-variant'}`}
+                                            >
+                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${theme === 'dark' ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                         {username ? (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
                                 <span className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
@@ -59,7 +126,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 <p className="font-body-sm text-body-sm text-on-surface-variant">Risk Management</p>
                             </div>
                         </div>
-                        <button className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-2 px-4 rounded font-semibold mb-stack-lg hover:bg-opacity-90 transition-opacity">
+                        <button onClick={() => setIsNewAnalysisOpen(true)} className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-2 px-4 rounded font-semibold mb-stack-lg hover:bg-opacity-90 transition-opacity">
                             + New Analysis
                         </button>
                         <nav className="flex flex-col gap-unit flex-1">
@@ -96,6 +163,94 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 </main>
             </div>
             
+            {isNewAnalysisOpen && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={closeNewAnalysis}>
+                    <div
+                        className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter w-full max-w-md shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex justify-between items-center mb-stack-md">
+                            <h3 className="font-title-lg text-title-lg text-primary">New Analysis</h3>
+                            <button onClick={closeNewAnalysis} className="text-on-surface-variant hover:text-primary">
+                                <span className="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+
+                        <div className="flex flex-col gap-stack-md">
+                            <div>
+                                <label className="font-body-sm text-body-sm font-medium block mb-1">Analysis name (optional)</label>
+                                <input
+                                    type="text"
+                                    value={analysisLabel}
+                                    onChange={(e) => setAnalysisLabel(e.target.value)}
+                                    placeholder="e.g. Q1 Payment Processing Review"
+                                    className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
+                                />
+                            </div>
+
+                            <div>
+                                <div className="flex justify-between mb-2">
+                                    <label className="font-body-sm text-body-sm font-medium">Security Budget</label>
+                                    <span className="font-data-mono text-data-mono font-bold">₹{analysisBudgetCr} Cr</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="15"
+                                    step="0.5"
+                                    value={analysisBudgetCr}
+                                    onChange={(e) => setAnalysisBudgetCr(Number(e.target.value))}
+                                    className="w-full h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
+                                />
+                            </div>
+
+                            <button
+                                onClick={runNewAnalysis}
+                                disabled={analysisLoading}
+                                className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-50"
+                            >
+                                {analysisLoading ? 'Running simulation...' : 'Run Analysis'}
+                            </button>
+
+                            {analysisError && (
+                                <p className="text-error font-body-sm text-body-sm">{analysisError}</p>
+                            )}
+
+                            {analysisResult && (
+                                <div className="border-t border-outline-variant pt-stack-md mt-stack-sm">
+                                    <h4 className="font-body-sm text-body-sm font-semibold mb-2">
+                                        {analysisLabel || 'Untitled Analysis'} - Results
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-stack-sm">
+                                        <div className="bg-surface-container-low border border-outline-variant rounded p-3">
+                                            <div className="font-label-caps text-label-caps text-on-surface-variant">Expected Annual Loss</div>
+                                            <div className="font-data-mono text-data-mono font-bold text-primary">
+                                                ₹{(analysisResult.monte_carlo.mean_expected_loss / 10000000).toFixed(2)} Cr
+                                            </div>
+                                        </div>
+                                        <div className="bg-surface-container-low border border-outline-variant rounded p-3">
+                                            <div className="font-label-caps text-label-caps text-on-surface-variant">95% VaR</div>
+                                            <div className="font-data-mono text-data-mono font-bold text-primary">
+                                                ₹{(analysisResult.monte_carlo.var_95 / 10000000).toFixed(2)} Cr
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="mt-stack-sm bg-surface-container-low border border-outline-variant rounded p-3">
+                                        <div className="font-label-caps text-label-caps text-on-surface-variant mb-1">Optimized Patch Selection</div>
+                                        <div className="font-body-sm text-body-sm">
+                                            {analysisResult.optimization.selected_patches.join(', ') || 'None within budget'}
+                                        </div>
+                                        <div className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                                            Total cost: ₹{Number(analysisResult.optimization.total_cost).toLocaleString()} · Risk reduced: ₹{Number(analysisResult.optimization.total_risk_reduced).toLocaleString()}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Footer */}
             <footer className="bg-surface border-t border-outline-variant docked full-width bottom-0 z-40">
                 <div className="flex flex-col md:flex-row justify-between items-center w-full px-container-padding py-stack-md max-w-[1440px] mx-auto gap-stack-sm">

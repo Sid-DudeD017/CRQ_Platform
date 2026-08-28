@@ -3,20 +3,36 @@
 import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 
 export default function ExecutiveDashboard() {
     const { token } = useAuth();
+    const { showToast } = useToast();
     const [budget, setBudget] = useState(65);
     const [simResults, setSimResults] = useState<any>(null);
+    const [isSimulating, setIsSimulating] = useState(false);
+    const [controls, setControls] = useState<Record<string, boolean>>({
+        'Enforce Cloud MFA': true,
+        'Patch Payment Gateway': false,
+        'Zero Trust Architecture': false,
+    });
+    const [optimizerPicks, setOptimizerPicks] = useState<string[] | null>(null);
+
+    const toggleControl = (name: string) => {
+        setControls((prev) => ({ ...prev, [name]: !prev[name] }));
+    };
+    const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
     const [chatInput, setChatInput] = useState('');
+    const [isChatSending, setIsChatSending] = useState(false);
 
     const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setBudget(Number(e.target.value));
     };
 
     const runSimulation = async () => {
+        setIsSimulating(true);
         try {
             // budget here is 0-100, let's map it to a budget. Max budget could be 15 Cr = 15,000,000
             const budgetValue = (budget / 100) * 15000000; 
@@ -27,19 +43,31 @@ export default function ExecutiveDashboard() {
             });
             const data = await res.json();
             setSimResults(data);
-            alert("Simulation complete! Results:\n" + JSON.stringify(data.optimization, null, 2));
+            const picks: string[] = data.optimization.selected_patches || [];
+            setOptimizerPicks(picks);
+            setControls((prev) => {
+                const next = { ...prev };
+                Object.keys(next).forEach((name) => {
+                    next[name] = picks.includes(name);
+                });
+                return next;
+            });
+            showToast(`Simulation complete - ${picks.length} of 3 controls recommended within this budget.`, 'success');
             console.log("Sim Results:", data);
         } catch (e) {
             console.error(e);
-            alert("Error running simulation. Ensure FastAPI is running on port 8000.");
+            showToast("Error running simulation. Ensure FastAPI is running on port 8000.", 'error');
+        } finally {
+            setIsSimulating(false);
         }
     };
 
     const acceptRisk = async (label: string, riskAmountRupees: number) => {
         if (!token) {
-            alert('Please log in first (top-right corner) before accepting risk.');
+            showToast('Please log in first (top-right corner) before accepting risk.', 'error');
             return;
         }
+        setAcceptingRiskFor(label);
         try {
             const res = await fetch('http://localhost:8000/api/audit', {
                 method: 'POST',
@@ -54,13 +82,15 @@ export default function ExecutiveDashboard() {
             });
             const data = await res.json();
             if (!res.ok) {
-                alert(`Could not log audit: ${data.detail || res.status}`);
+                showToast(`Could not log audit: ${data.detail || res.status}`, 'error');
                 return;
             }
-            alert(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id}\nDecided by: ${data.decided_by}`);
+            showToast(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id} - Decided by: ${data.decided_by}`, 'success');
         } catch (e) {
             console.error(e);
-            alert('Error contacting backend. Is it running on port 8000?');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+        } finally {
+            setAcceptingRiskFor(null);
         }
     };
 
@@ -70,6 +100,7 @@ export default function ExecutiveDashboard() {
         const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
         setChatMessages(newMessages);
         setChatInput('');
+        setIsChatSending(true);
         
         try {
             const res = await fetch('http://localhost:8000/api/chat', {
@@ -96,6 +127,8 @@ export default function ExecutiveDashboard() {
         } catch (e) {
             console.error(e);
             setChatMessages([...newMessages, { role: 'assistant', content: "Error communicating with Virtual CISO." }]);
+        } finally {
+            setIsChatSending(false);
         }
     };
 
@@ -115,7 +148,7 @@ export default function ExecutiveDashboard() {
   <span className="material-symbols-outlined text-[14px] text-primary">policy</span> NIST CSF | RBI | SEBI
 </span>
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">FY 2024</span>
-<button className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors">
+<button className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95">
 <span className="material-symbols-outlined text-[18px]">download</span> Export Report
                      </button>
 </div>
@@ -123,7 +156,7 @@ export default function ExecutiveDashboard() {
 {/*  Bento Grid Layout  */}
 <div className="grid grid-cols-12 gap-gutter mb-stack-lg">
 {/*  Centerpiece: ALE  */}
-<div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between hover:border-primary transition-colors">
+<div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 <div>
 <div className="flex justify-between items-start mb-stack-sm">
 <h3 className="font-title-lg text-title-lg text-primary">Annualized Loss Expectancy</h3>
@@ -132,7 +165,7 @@ export default function ExecutiveDashboard() {
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Projected financial impact based on current control posture.</p>
 </div>
 <div>
-<div className="flex items-baseline gap-2">
+<div key={simResults ? 'loaded-ale' : 'default-ale'} className="flex items-baseline gap-2 animate-fade-scale-in">
 <span className="font-display-lg text-display-lg text-primary tracking-tighter">
   ₹{simResults ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
 </span>
@@ -146,21 +179,21 @@ export default function ExecutiveDashboard() {
 </div>
 {/*  Scorecards  */}
 <div className="col-span-12 lg:col-span-3 flex flex-col gap-gutter">
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary transition-colors">
+<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
 <div className="font-headline-md text-headline-md text-primary font-data-mono">
   ₹{simResults ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
 </div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
 </div>
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary transition-colors">
+<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">Overall ROI of Spend</h4>
 <div className="font-headline-md text-headline-md text-[#15803d] font-data-mono flex items-center"><span className="material-symbols-outlined mr-1">arrow_upward</span>18%</div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Security efficiency</div>
 </div>
 </div>
 {/*  Loss Distribution Chart  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col hover:border-primary transition-colors">
+<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 <h3 className="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
 <div className="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
@@ -193,7 +226,7 @@ export default function ExecutiveDashboard() {
 {/*  Bottom Row: Sandbox & Breakdown  */}
 <div className="grid grid-cols-12 gap-gutter">
 {/*  What-If Sandbox  */}
-<div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary transition-colors">
+<div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary hover:shadow-lg transition-all duration-200">
 <div className="flex justify-between items-center mb-stack-lg">
 <h3 className="font-title-lg text-title-lg text-primary">Simulation Sandbox</h3>
 <span className="bg-secondary-container text-on-secondary-container px-2 py-1 rounded font-label-caps text-label-caps">Draft Mode</span>
@@ -218,50 +251,72 @@ export default function ExecutiveDashboard() {
 <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-md">
 <div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
 <div className="flex flex-col">
+<div className="flex items-center gap-2">
 <span className="font-body-sm text-body-sm font-medium">Enforce Cloud MFA</span>
+{optimizerPicks && optimizerPicks.includes('Enforce Cloud MFA') && (
+    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
+        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
+    </span>
+)}
+</div>
 <span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹45L</span>
 </div>
 <label className="relative inline-flex items-center cursor-pointer">
-<input defaultChecked={true} className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<input checked={controls['Enforce Cloud MFA']} onChange={() => toggleControl('Enforce Cloud MFA')} className="sr-only peer" type="checkbox" value="" />
+<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
 </label>
 </div>
 <div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
 <div className="flex flex-col">
+<div className="flex items-center gap-2">
 <span className="font-body-sm text-body-sm font-medium">Patch Payment Gateway</span>
+{optimizerPicks && optimizerPicks.includes('Patch Payment Gateway') && (
+    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
+        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
+    </span>
+)}
+</div>
 <span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹1.2 Cr</span>
 </div>
 <label className="relative inline-flex items-center cursor-pointer">
-<input className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<input checked={controls['Patch Payment Gateway']} onChange={() => toggleControl('Patch Payment Gateway')} className="sr-only peer" type="checkbox" value="" />
+<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
 </label>
 </div>
 <div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
 <div className="flex flex-col">
+<div className="flex items-center gap-2">
 <span className="font-body-sm text-body-sm font-medium">Zero Trust Architecture</span>
+{optimizerPicks && optimizerPicks.includes('Zero Trust Architecture') && (
+    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
+        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
+    </span>
+)}
+</div>
 <span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹3.5 Cr</span>
 </div>
 <label className="relative inline-flex items-center cursor-pointer">
-<input className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+<input checked={controls['Zero Trust Architecture']} onChange={() => toggleControl('Zero Trust Architecture')} className="sr-only peer" type="checkbox" value="" />
+<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
 </label>
 </div>
 </div>
 </div>
-<button onClick={runSimulation} className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 transition-opacity">
-                            Run Simulation
+<button onClick={runSimulation} disabled={isSimulating} className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                            {isSimulating && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
+                            {isSimulating ? 'Running Simulation...' : 'Run Simulation'}
                         </button>
 </div>
 </div>
 {/*  Strategic Breakdown  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary transition-colors">
+<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary hover:shadow-lg transition-all duration-200">
 <h3 className="font-title-lg text-title-lg text-primary mb-stack-lg">Risk by Business Unit</h3>
 <div className="space-y-4">
 {/*  Unit 1  */}
 <div>
 <div className="flex justify-between items-end mb-1">
 <span className="font-body-sm text-body-sm font-medium">Payment Processing</span>
-<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button onClick={() => acceptRisk('Payment Processing', 20000000)} className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors">Accept Risk</button>
+<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button onClick={() => acceptRisk('Payment Processing', 20000000)} disabled={acceptingRiskFor === 'Payment Processing'} className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors active:scale-95 disabled:opacity-60">{acceptingRiskFor === 'Payment Processing' ? 'Logging...' : 'Accept Risk'}</button>
 </div>
 <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
 <div className="bg-error h-2 rounded" style={{width: "45%"}}></div>
@@ -298,15 +353,15 @@ export default function ExecutiveDashboard() {
 </div>
 </div>
 </div>
-<button className="mt-stack-lg text-primary font-body-sm text-body-sm font-semibold flex items-center gap-1 hover:underline">
+<a href="/ledger" className="mt-stack-lg text-primary font-body-sm text-body-sm font-semibold flex items-center gap-1 hover:underline w-fit">
                         View Detailed Ledger <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-</button>
+</a>
 </div>
 </div>
 </main>
 {/* AI Chat Panel */}
 {isChatOpen && (
-    <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50">
+    <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50 animate-fade-scale-in">
         <div className="bg-primary text-on-primary p-4 flex justify-between items-center">
             <h3 className="font-title-md font-bold">Virtual CISO</h3>
             <button onClick={() => setIsChatOpen(false)} className="hover:opacity-80">
@@ -319,11 +374,43 @@ export default function ExecutiveDashboard() {
                     Ask me about the risk simulation or compliance frameworks...
                 </div>
             )}
-            {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`p-3 rounded-lg max-w-[85%] ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}>
-                    <p className="text-body-sm whitespace-pre-wrap">{msg.content || '...'}</p>
-                </div>
-            ))}
+            {chatMessages.map((msg, idx) => {
+                // Compliance answers end with a "Sources: RBI, SEBI" line (see
+                // ai-agent/rag.py) - split it out and render as chips instead of
+                // plain trailing text, so the citation actually stands out as a
+                // trust signal rather than blending into the paragraph.
+                const sourceMatch = msg.content.match(/\n*Sources?:\s*([A-Za-z0-9,\/ ]+)\s*$/i);
+                const mainText = sourceMatch ? msg.content.slice(0, sourceMatch.index) : msg.content;
+                const sourceTags = sourceMatch
+                    ? sourceMatch[1].split(',').map((s) => s.trim()).filter(Boolean)
+                    : [];
+
+                return (
+                    <div key={idx} className={`p-3 rounded-lg max-w-[85%] animate-fade-scale-in ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}>
+                        {msg.role === 'assistant' && !msg.content && isChatSending ? (
+                            <div className="flex gap-1 py-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                            </div>
+                        ) : (
+                            <>
+                                <p className="text-body-sm whitespace-pre-wrap">{mainText}</p>
+                                {sourceTags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-outline-variant/50">
+                                        <span className="material-symbols-outlined text-[14px] text-on-surface-variant mt-0.5">verified</span>
+                                        {sourceTags.map((tag, i) => (
+                                            <span key={i} className="px-2 py-0.5 bg-primary-container text-on-primary-container rounded font-label-caps text-label-caps">
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                );
+            })}
         </div>
         <div className="p-3 border-t border-outline-variant bg-surface-container-low flex gap-2">
             <input 
@@ -334,8 +421,8 @@ export default function ExecutiveDashboard() {
                 placeholder="Type your message..." 
                 className="flex-1 bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
             />
-            <button onClick={sendMessage} className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90">
-                <span className="material-symbols-outlined">send</span>
+            <button onClick={sendMessage} disabled={isChatSending} className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90 active:scale-90 transition-transform disabled:opacity-60">
+                <span className="material-symbols-outlined">{isChatSending ? 'hourglass_top' : 'send'}</span>
             </button>
         </div>
     </div>
@@ -343,10 +430,10 @@ export default function ExecutiveDashboard() {
 
 <button 
     onClick={() => setIsChatOpen(!isChatOpen)}
-    className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" 
+    className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 hover:scale-105 transition-all active:scale-95" 
     aria-label="AI Assistant"
 >
-    <span className="material-symbols-outlined text-[28px] fill-icon">
+    <span className={`material-symbols-outlined text-[28px] fill-icon transition-transform duration-300 ${isChatOpen ? 'rotate-90' : 'rotate-0'}`}>
         {isChatOpen ? 'close' : 'auto_awesome'}
     </span>
 </button>

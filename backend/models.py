@@ -101,12 +101,20 @@ class RiskDecision(SQLModel, table=True):
     Audit record behind /api/audit. Append-only - this is what would get
     hashed onto the blockchain ledger. Previously this data only ever hit a
     print() statement; now it's persisted so it survives a restart.
+
+    tx_hash/on_chain are filled in slightly after the row is first created
+    (see trigger_blockchain_webhook in main.py) - the row is written
+    synchronously so /api/audit can respond immediately with a decision_id,
+    then a background task attempts the actual on-chain call and updates
+    this same row with the result once it knows it.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     action: str
     risk_accepted: float
     decided_by: str  # from the verified JWT, never the request body
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    tx_hash: Optional[str] = None
+    on_chain: bool = False
 
 
 # Compatibility alias - see module docstring.

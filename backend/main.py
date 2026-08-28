@@ -41,7 +41,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from . import blockchain_client, generators, models
-from .database import get_db, init_db
+from .database import SessionLocal, get_db, init_db
 from .security import authenticate_demo_user, create_access_token, get_current_user
 
 # --- Add sibling directories to path to handle hyphens in folder names ---
@@ -218,11 +218,14 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
         slm_min=base_slm * 0.5, slm_mode=base_slm, slm_max=base_slm * 2.0,
     )
 
+    # Named to match the "Strategic Controls" toggles on the dashboard
+    # (frontend/src/app/page.tsx) exactly, so the frontend can highlight
+    # whichever ones the optimizer actually recommends for the chosen
+    # budget instead of those toggles being purely decorative.
     dummy_patches = [
-        {"id": "PATCH-001 (Firewall)", "cost": 5000, "risk_reduction": 20000},
-        {"id": "PATCH-002 (EDR Upgrade)", "cost": 15000, "risk_reduction": 60000},
-        {"id": "PATCH-003 (IAM Sync)", "cost": 8000, "risk_reduction": 25000},
-        {"id": "PATCH-004 (Zero-Trust Proxy)", "cost": 25000, "risk_reduction": 100000},
+        {"id": "Enforce Cloud MFA", "cost": 4500000, "risk_reduction": 18000000},
+        {"id": "Patch Payment Gateway", "cost": 12000000, "risk_reduction": 40000000},
+        {"id": "Zero Trust Architecture", "cost": 35000000, "risk_reduction": 90000000},
     ]
     opt_results = quant_opt.optimize_budget(dummy_patches, request.budget)
 
@@ -306,6 +309,12 @@ def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id:
     deployed (see blockchain_client.py for how to start it). Falls back to
     a print()-only mock otherwise, so this endpoint keeps working for
     anyone who isn't running Hardhat locally.
+
+    Runs as a BackgroundTask, i.e. after the HTTP response for /api/audit
+    has already gone out - the request's own `db` session is closed by
+    then, so this opens its own short-lived session to write the tx hash
+    (or lack of one) back onto the same RiskDecision row, which is what
+    GET /api/audit-log reads to show real on-chain status per decision.
     """
     data_hash = f"decision:{decision_id}|risk:{risk}"
     tx_hash = blockchain_client.log_risk_acceptance(action=action, data_hash=data_hash, user=user)
@@ -315,6 +324,14 @@ def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id:
     else:
         print(f"\n[BLOCKCHAIN AUDIT LOG] (mock - no local Hardhat chain reachable) Would commit to AuditLedger.sol!")
         print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
+
+    with SessionLocal() as bg_db:
+        decision = bg_db.get(models.RiskDecision, decision_id)
+        if decision:
+            decision.tx_hash = tx_hash
+            decision.on_chain = bool(tx_hash)
+            bg_db.add(decision)
+            bg_db.commit()
 
 
 @app.post("/api/audit")
@@ -355,3 +372,18 @@ def log_audit(
         "decision_id": decision.id,
         "decided_by": current_user,
     }
+
+
+@app.get("/api/audit-log")
+def get_audit_log(db: Session = Depends(get_db)):
+    """
+    Lists every risk-acceptance decision on record, most recent first -
+    backs the "View Detailed Ledger" page. Each row also reports whether
+    it actually made it onto the local blockchain (tx_hash/on_chain),
+    which trigger_blockchain_webhook fills in shortly after the decision
+    is created.
+    """
+    decisions = db.exec(
+        select(models.RiskDecision).order_by(models.RiskDecision.created_at.desc()).limit(200)
+    ).all()
+    return {"status": "success", "data": decisions}
