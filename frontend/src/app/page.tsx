@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { API_BASE } from '@/lib/api';
 
 export default function ExecutiveDashboard() {
     const { token } = useAuth();
@@ -37,7 +38,7 @@ export default function ExecutiveDashboard() {
         try {
             // budget here is 0-100, let's map it to a budget. Max budget could be 15 Cr = 15,000,000
             const budgetValue = (budget / 100) * 15000000; 
-            const res = await fetch('http://localhost:8000/api/simulate-risk', {
+            const res = await fetch(`${API_BASE}/api/simulate-risk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ budget: budgetValue })
@@ -70,7 +71,7 @@ export default function ExecutiveDashboard() {
         }
         setAcceptingRiskFor(label);
         try {
-            const res = await fetch('http://localhost:8000/api/audit', {
+            const res = await fetch(`${API_BASE}/api/audit`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -107,7 +108,7 @@ export default function ExecutiveDashboard() {
         }
         setIsApproving(true);
         try {
-            const res = await fetch('http://localhost:8000/api/audit', {
+            const res = await fetch(`${API_BASE}/api/audit`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -142,7 +143,7 @@ export default function ExecutiveDashboard() {
         setIsChatSending(true);
         
         try {
-            const res = await fetch('http://localhost:8000/api/chat', {
+            const res = await fetch(`${API_BASE}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: chatInput, context: simResults })

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { API_BASE } from '@/lib/api';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -23,7 +24,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         setAnalysisError(null);
         setAnalysisResult(null);
         try {
-            const res = await fetch('http://localhost:8000/api/simulate-risk', {
+            const res = await fetch(`${API_BASE}/api/simulate-risk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ budget: analysisBudgetCr * 10000000, constraints: {} }),

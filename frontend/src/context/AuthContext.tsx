@@ -1,5 +1,6 @@
 "use client";
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { API_BASE } from '@/lib/api';
 
 // Minimal auth context so any page/component (e.g. the Accept Risk button)
 // can grab a bearer token to call protected backend endpoints like
@@ -47,7 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             body.append('password', creds.password);
             body.append('grant_type', 'password');
 
-            const res = await fetch('http://localhost:8000/api/auth/login', {
+            const res = await fetch(`${API_BASE}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: body.toString(),

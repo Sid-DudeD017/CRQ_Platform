@@ -1,0 +1,20 @@
+# Render "Blueprint" for the FastAPI backend. In the Render dashboard:
+# New -> Blueprint -> connect this repo -> Render reads this file and
+# pre-fills everything below except the secrets marked sync: false,
+# which you paste in yourself after the service is created.
+services:
+  - type: web
+    name: crq-platform-backend
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+      - key: DATABASE_URL
+        sync: false   # paste your Neon connection string here
+      - key: GROQ_API_KEY
+        sync: false   # your (rotated) Groq key
+      - key: SECRET_KEY
+        generateValue: true   # Render generates a real random JWT signing secret

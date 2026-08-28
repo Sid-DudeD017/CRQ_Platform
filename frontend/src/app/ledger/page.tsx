@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { API_BASE } from '@/lib/api';
 
 interface Decision {
     id: number;
@@ -27,7 +28,7 @@ export default function LedgerPage() {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetch('http://localhost:8000/api/audit-log');
+            const res = await fetch(`${API_BASE}/api/audit-log`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
