@@ -2,9 +2,47 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
+    const [chatInput, setChatInput] = useState('');
+
+    const sendMessage = async () => {
+        if (!chatInput.trim()) return;
+        
+        const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
+        setChatMessages(newMessages);
+        setChatInput('');
+        
+        try {
+            const res = await fetch('http://localhost:8000/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: chatInput, context: null })
+            });
+            
+            const reader = res.body?.getReader();
+            const decoder = new TextDecoder();
+            let assistantResponse = '';
+            
+            setChatMessages([...newMessages, { role: 'assistant', content: '' }]);
+            
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    assistantResponse += decoder.decode(value);
+                    setChatMessages([...newMessages, { role: 'assistant', content: assistantResponse }]);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+            setChatMessages([...newMessages, { role: 'assistant', content: "Error communicating with Virtual CISO." }]);
+        }
+    };
 
     const navItems = [
         { path: '/', icon: 'dashboard', label: 'Overview' },
@@ -72,10 +110,54 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 <main className="flex-1 p-container-padding bg-background overflow-y-auto w-full relative">
                     {children}
                     
-                    {/* Chatbot Button */}
-                    <button className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" aria-label="AI Assistant">
-                        <span className="material-symbols-outlined text-[28px]">auto_awesome</span>
+                    
+                    {/* AI Chat Panel */}
+                    {isChatOpen && (
+                        <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50">
+                            <div className="bg-primary text-on-primary p-4 flex justify-between items-center">
+                                <h3 className="font-title-md font-bold">Virtual CISO</h3>
+                                <button onClick={() => setIsChatOpen(false)} className="hover:opacity-80">
+                                    <span className="material-symbols-outlined">close</span>
+                                </button>
+                            </div>
+                            <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2">
+                                {chatMessages.length === 0 && (
+                                    <div className="text-on-surface-variant text-body-sm text-center mt-4">
+                                        Ask me about the risk simulation or compliance frameworks...
+                                    </div>
+                                )}
+                                {chatMessages.map((msg, idx) => (
+                                    <div key={idx} className={`p-3 rounded-lg max-w-[85%] ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}>
+                                        <p className="text-body-sm whitespace-pre-wrap">{msg.content || '...'}</p>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="p-3 border-t border-outline-variant bg-surface-container-low flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={chatInput}
+                                    onChange={(e) => setChatInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                                    placeholder="Type your message..." 
+                                    className="flex-1 bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary text-on-surface"
+                                />
+                                <button onClick={sendMessage} className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90">
+                                    <span className="material-symbols-outlined">send</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    
+                    <button 
+                        onClick={() => setIsChatOpen(!isChatOpen)}
+                        className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" 
+                        aria-label="AI Assistant"
+                    >
+                        <span className="material-symbols-outlined text-[28px]">
+                            {isChatOpen ? 'close' : 'auto_awesome'}
+                        </span>
                     </button>
+
                 </main>
             </div>
             

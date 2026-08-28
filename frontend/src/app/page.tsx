@@ -9,6 +9,9 @@ export default function ExecutiveDashboard() {
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
     const [chatInput, setChatInput] = useState('');
+    const [toastMessage, setToastMessage] = useState('');
+    const [txHash, setTxHash] = useState('');
+    const [isAccepting, setIsAccepting] = useState(false);
 
     const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setBudget(Number(e.target.value));
@@ -24,8 +27,13 @@ export default function ExecutiveDashboard() {
                 body: JSON.stringify({ budget: budgetValue })
             });
             const data = await res.json();
+            
+            if (!res.ok) {
+                alert(`Simulation failed: ${data.detail || "Unknown error"}`);
+                return;
+            }
+            
             setSimResults(data);
-            alert("Simulation complete! Results:\n" + JSON.stringify(data.optimization, null, 2));
             console.log("Sim Results:", data);
         } catch (e) {
             console.error(e);
@@ -33,6 +41,7 @@ export default function ExecutiveDashboard() {
         }
     };
 
+    
     const sendMessage = async () => {
         if (!chatInput.trim()) return;
         
@@ -66,6 +75,112 @@ export default function ExecutiveDashboard() {
             console.error(e);
             setChatMessages([...newMessages, { role: 'assistant', content: "Error communicating with Virtual CISO." }]);
         }
+    };
+
+    const acceptRisk = async (unitName: string, riskAmount: number) => {
+        setIsAccepting(true);
+        setToastMessage(`Authenticating and hashing risk decision for ${unitName}...`);
+        setTxHash('');
+        
+        try {
+            // 1. Authenticate to get Bearer token (as per README TODO)
+            const authRes = await fetch('http://localhost:8000/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    username: 'ciso',
+                    password: 'demo-ciso-pass'
+                })
+            });
+            
+            if (!authRes.ok) {
+                setToastMessage("Authentication failed. Cannot accept risk.");
+                setIsAccepting(false);
+                setTimeout(() => setToastMessage(''), 5000);
+                return;
+            }
+            const authData = await authRes.json();
+            const token = authData.access_token;
+
+            // 2. Log the audit with the token
+            const res = await fetch('http://localhost:8000/api/audit', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ 
+                    action: `Accept Risk: ${unitName}`, 
+                    risk_accepted: riskAmount, 
+                    user_id: "CISO-1234",
+                    board_approved: true 
+                })
+            });
+            const data = await res.json();
+            
+            if (data.tx_hash) {
+                setToastMessage("Risk Decision Hashed and Logged to Blockchain.");
+                setTxHash(data.tx_hash);
+            } else {
+                setToastMessage("Warning: Logged locally, but Blockchain transaction failed/mocked.");
+                setTxHash(data.tx_hash || "0xmock");
+            }
+            
+            setTimeout(() => {
+                setToastMessage('');
+                setTxHash('');
+            }, 10000); // hide after 10s
+        } catch (e) {
+            console.error(e);
+            setToastMessage("Error communicating with Audit server.");
+            setTimeout(() => setToastMessage(''), 5000);
+        }
+        setIsAccepting(false);
+    };
+
+    const approveOptimizer = async () => {
+        if (!simResults?.optimization) return;
+        setIsAccepting(true);
+        setToastMessage("Logging Optimizer Approval to Blockchain...");
+        
+        try {
+            const authRes = await fetch('http://localhost:8000/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ username: 'ciso', password: 'demo-ciso-pass' })
+            });
+            
+            if (!authRes.ok) {
+                setToastMessage("Authentication failed. Cannot approve.");
+                setIsAccepting(false);
+                setTimeout(() => setToastMessage(''), 5000);
+                return;
+            }
+            const authData = await authRes.json();
+            const token = authData.access_token;
+
+            const res = await fetch('http://localhost:8000/api/audit', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ 
+                    action: `Approve AI Optimization Plan`, 
+                    risk_accepted: simResults.optimization.total_cost, 
+                    user_id: "CISO-1234",
+                    board_approved: true 
+                })
+            });
+            const data = await res.json();
+            setToastMessage("Optimization Plan Approved & Logged!");
+            setTimeout(() => setToastMessage(''), 5000);
+        } catch (e) {
+            console.error(e);
+            setToastMessage("Error communicating with Audit server.");
+            setTimeout(() => setToastMessage(''), 5000);
+        }
+        setIsAccepting(false);
     };
 
     return (
@@ -103,7 +218,7 @@ export default function ExecutiveDashboard() {
 <div>
 <div className="flex items-baseline gap-2">
 <span className="font-display-lg text-display-lg text-primary tracking-tighter">
-  ₹{simResults ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
+  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
 </span>
 <span className="font-headline-sm text-headline-sm text-on-surface-variant">Cr</span>
 </div>
@@ -118,7 +233,7 @@ export default function ExecutiveDashboard() {
 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary transition-colors">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
 <div className="font-headline-md text-headline-md text-primary font-data-mono">
-  ₹{simResults ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
+  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
 </div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
 </div>
@@ -133,7 +248,7 @@ export default function ExecutiveDashboard() {
 <h3 className="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
 <div className="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
-{simResults && simResults.monte_carlo.distribution_curve ? (
+{simResults && simResults.monte_carlo && simResults.monte_carlo.distribution_curve ? (
     <ResponsiveContainer width="100%" height={150}>
         <AreaChart data={simResults.monte_carlo.distribution_curve} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
@@ -183,38 +298,39 @@ export default function ExecutiveDashboard() {
 <hr className="border-outline-variant border-dashed" />
 {/*  Strategic Controls  */}
 <div>
-<h4 className="font-body-sm text-body-sm font-semibold mb-stack-md">Strategic Controls</h4>
+<div className="flex justify-between items-center mb-stack-md">
+  <h4 className="font-body-sm text-body-sm font-semibold">Recommended Controls</h4>
+  {simResults?.optimization?.total_cost && (
+    <div className="flex items-center gap-2">
+      <span className="font-label-caps text-label-caps text-on-surface-variant">
+        Optimized Cost: ₹{simResults.optimization.total_cost.toLocaleString()}
+      </span>
+      <button 
+        onClick={approveOptimizer}
+        disabled={isAccepting}
+        className="px-3 py-1 bg-[#15803d] text-white rounded font-label-caps text-label-caps font-semibold hover:bg-opacity-90 disabled:opacity-50 transition-colors"
+      >
+        {isAccepting ? "Logging..." : "Approve & Log"}
+      </button>
+    </div>
+  )}
+</div>
 <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-md">
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<span className="font-body-sm text-body-sm font-medium">Enforce Cloud MFA</span>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹45L</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input defaultChecked={true} className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-</label>
-</div>
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<span className="font-body-sm text-body-sm font-medium">Patch Payment Gateway</span>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹1.2 Cr</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-</label>
-</div>
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<span className="font-body-sm text-body-sm font-medium">Zero Trust Architecture</span>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹3.5 Cr</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-</label>
-</div>
+  {simResults && simResults.optimization && simResults.optimization.selected_patches ? (
+    simResults.optimization.selected_patches.map((patch: string, idx: number) => (
+      <div key={idx} className="flex items-center justify-between p-3 border border-primary rounded bg-primary-container text-on-primary-container transition-colors">
+        <div className="flex flex-col">
+          <span className="font-body-sm text-body-sm font-medium">{patch}</span>
+          <span className="font-label-caps text-label-caps opacity-80 mt-1">Status: Selected by Optimizer</span>
+        </div>
+        <span className="material-symbols-outlined text-primary">check_circle</span>
+      </div>
+    ))
+  ) : (
+    <div className="col-span-1 md:col-span-2 p-4 border border-outline-variant border-dashed rounded text-center text-on-surface-variant font-body-sm">
+      Run simulation to view AI-optimized strategic controls.
+    </div>
+  )}
 </div>
 </div>
 <button onClick={runSimulation} className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 transition-opacity">
@@ -230,7 +346,7 @@ export default function ExecutiveDashboard() {
 <div>
 <div className="flex justify-between items-end mb-1">
 <span className="font-body-sm text-body-sm font-medium">Payment Processing</span>
-<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors">Accept Risk</button>
+<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button onClick={() => acceptRisk("Payment Processing", 20000000)} disabled={isAccepting} className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors disabled:opacity-50">{isAccepting ? "Logging..." : "Accept Risk"}</button>
 </div>
 <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
 <div className="bg-error h-2 rounded" style={{width: "45%"}}></div>
@@ -272,6 +388,28 @@ export default function ExecutiveDashboard() {
 </button>
 </div>
 </div>
+{toastMessage && (
+    <div className="fixed top-4 right-4 bg-surface-container-highest border border-outline-variant rounded-lg p-4 shadow-xl z-50 max-w-sm animate-in fade-in slide-in-from-top-5">
+        <div className="flex items-start gap-3">
+            <span className={`material-symbols-outlined ${txHash && txHash !== '0xmock' ? 'text-[#15803d]' : 'text-primary'}`}>
+                {txHash && txHash !== '0xmock' ? 'verified_user' : 'info'}
+            </span>
+            <div>
+                <p className="font-body-sm text-body-sm font-medium">{toastMessage}</p>
+                {txHash && txHash !== '0xmock' && (
+                    <a 
+                        href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 font-label-caps text-label-caps bg-primary text-on-primary px-3 py-1.5 rounded hover:bg-opacity-90 transition-colors"
+                    >
+                        View on Etherscan <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    </a>
+                )}
+            </div>
+        </div>
+    </div>
+)}
 </main>
 {/* AI Chat Panel */}
 {isChatOpen && (
@@ -312,7 +450,7 @@ export default function ExecutiveDashboard() {
 
 <button 
     onClick={() => setIsChatOpen(!isChatOpen)}
-    className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" 
+    className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-[16px] bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 transition-all active:scale-95" 
     aria-label="AI Assistant"
 >
     <span className="material-symbols-outlined text-[28px] fill-icon">

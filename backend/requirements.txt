@@ -7,3 +7,5 @@ pydantic
 PyJWT
 Faker
 python-multipart
+web3
+python-dotenv

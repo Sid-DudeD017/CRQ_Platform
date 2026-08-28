@@ -158,8 +158,34 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
         if log.incident_alert_level == "CRITICAL":
             base_tef += 20.0
             
-    avg_vulnerability = (sum(log.vulnerability_score for log in latest_logs) / len(latest_logs) if latest_logs else 5.0)
+    # --- BEGIN Blast Radius & Conditional Vulnerability ---
+    asset_ids = [a.id for a in assets]
+    index = {asset_id: i for i, asset_id in enumerate(asset_ids)}
+    n = len(asset_ids)
+    
+    v_intrinsic = [5.0] * n
+    log_by_asset = {log.asset_id: log for log in latest_logs}
+    for i, asset in enumerate(assets):
+        log = log_by_asset.get(asset.id)
+        if log:
+            v_intrinsic[i] = log.vulnerability_score
+            
+    matrix = [[0.0 for _ in range(n)] for _ in range(n)]
+    edges = db.exec(select(models.NetworkEdge)).all()
+    for edge in edges:
+        i, j = index.get(edge.source_asset_id), index.get(edge.target_asset_id)
+        if i is not None and j is not None:
+            matrix[i][j] = edge.weight
+            matrix[j][i] = edge.weight
+            
+    v_eff = [0.0] * n
+    for i in range(n):
+        neighbor_sum = sum(matrix[i][j] * v_intrinsic[j] for j in range(n))
+        v_eff[i] = v_intrinsic[i] + (0.2 * neighbor_sum) # 0.2 decay factor
+        
+    avg_vulnerability = sum(v_eff) / n if n > 0 else 5.0
     avg_cs_upstream = max(10.0, 100.0 - (avg_vulnerability * 10))
+    # --- END Blast Radius ---
     
     deductions = 0.0
     for log in latest_logs:
@@ -177,12 +203,22 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
             deductions += 15.0
         deductions += (log.cloud_misconfigurations_count * 1.0)
         
-    avg_cs = max(5.0, avg_cs_upstream - (deductions / max(1, len(latest_logs))))
+    avg_cs = max(5.0, avg_cs_upstream - (deductions / max(1, len(latest_logs)) if latest_logs else 0))
     
     base_plm = total_business_value * 0.05
     base_slm = total_business_value * 0.02
     
-    is_dpdp = request.constraints.get("is_dpdp_applicable", True) if request.constraints else True
+    # --- BEGIN Contextual Statutory Triggers (DPDP Act) ---
+    is_dpdp = False
+    for i, asset in enumerate(assets):
+        if asset.data_classification == "PII" and v_eff[i] > 7.0:
+            is_dpdp = True
+            break
+            
+    # Let request constraints override if specifically provided
+    if request.constraints and "is_dpdp_applicable" in request.constraints:
+        is_dpdp = request.constraints["is_dpdp_applicable"]
+    # --- END Contextual Triggers ---
 
     mc_results = quant_mc.run_fair_monte_carlo(
         tef_min=max(5.0, base_tef - 20), tef_mode=base_tef, tef_max=base_tef + 50,
@@ -263,17 +299,18 @@ async def chat(request: ChatRequest):
 
 
 def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id: int, board_approved: bool):
-    """
-    Mock function to simulate an async webhook to the Hardhat local EVM.
-    """
-    print(f"\n[BLOCKCHAIN AUDIT LOG] Successfully committed to AuditLedger.sol!")
-    print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id} | Board Approved: {board_approved}\n")
-
+    data_string = f"Action: {action}, Risk: {risk}, DecisionID: {decision_id}"
+    tx_hash = blockchain_client.sign_and_send_audit(action, data_string, user, board_approved)
+    
+    if tx_hash:
+        print(f"\n[BLOCKCHAIN AUDIT LOG] Successfully committed to AuditLedger.sol!")
+        print(f"TxHash: {tx_hash} | User: {user} | Action: {action} | Risk: ${risk:,.2f} | Board Approved: {board_approved}\n")
+    else:
+        print(f"\n[BLOCKCHAIN AUDIT LOG] FAILED to commit.\n")
 
 @app.post("/api/audit")
 def log_audit(
     request: AuditRequest,
-    background_tasks: BackgroundTasks,
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -286,9 +323,9 @@ def log_audit(
     db.commit()
     db.refresh(decision)
 
-    background_tasks.add_task(
-        trigger_blockchain_webhook, request.action, request.risk_accepted, current_user, decision.id, request.board_approved
-    )
+    # Note: Sending synchronously for hackathon demo to return txHash to UI immediately.
+    data_string = f"Action: {request.action}, Risk: {request.risk_accepted}, DecisionID: {decision.id}"
+    tx_hash = blockchain_client.sign_and_send_audit(request.action, data_string, current_user, request.board_approved)
 
     return {
         "status": "success",
@@ -296,5 +333,6 @@ def log_audit(
         "action": request.action,
         "decision_id": decision.id,
         "decided_by": current_user,
-        "board_approved": request.board_approved
+        "board_approved": request.board_approved,
+        "tx_hash": tx_hash
     }
