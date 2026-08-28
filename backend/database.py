@@ -15,8 +15,13 @@ Compatibility notes:
 """
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session, SQLModel, create_engine
+
+# Loads backend/.env if present (e.g. DATABASE_URL for Neon Postgres).
+# Never overrides a real env var already set in the shell.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("NEON_DATABASE_URL") or "sqlite:///./crq_db.sqlite3"
 
