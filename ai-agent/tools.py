@@ -26,7 +26,7 @@ def optimize_budget(budget: float) -> str:
     return f"Optimized budget for ${budget}: {opt_results}"
 
 @tool
-def run_monte_carlo_var() -> str:
+def run_monte_carlo_var(is_dpdp_applicable: bool = True) -> str:
     """
     Triggers the FAIR Monte Carlo Engine to generate Value at Risk (VaR) distribution curves.
     """
@@ -35,7 +35,8 @@ def run_monte_carlo_var() -> str:
         tc_min=20.0, tc_mode=60.0, tc_max=95.0,
         cs_min=30.0, cs_mode=50.0, cs_max=80.0,
         plm_min=10000.0, plm_mode=50000.0, plm_max=250000.0,
-        slm_min=5000.0, slm_mode=20000.0, slm_max=100000.0
+        slm_min=5000.0, slm_mode=20000.0, slm_max=100000.0,
+        is_dpdp_applicable=is_dpdp_applicable
     )
     return f"Monte Carlo Results: Mean Expected Loss = ${mc_results['mean_expected_loss']:,.2f}, 95th Percentile VaR = ${mc_results['var_95']:,.2f}"
 

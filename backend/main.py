@@ -3,31 +3,18 @@ CRQ Platform - FastAPI Central Gateway
 
 Single entrypoint every other layer talks to: the frontend, quant-engine
 (FAIR Monte Carlo + Knapsack), ai-agent (LangGraph), and the blockchain
-audit webhook. Endpoint paths and request/response shapes are UNCHANGED
-from the original scaffold - anything already calling this should keep
-working exactly as before, with one deliberate exception (see /api/audit).
+audit webhook.
 
-What changed under the hood: SQLModel instead of raw SQLAlchemy (so the
-schema doubles as its own request/response validation - this also fixes a
-latent bug where /api/telemetry would have crashed trying to JSON-serialize
-raw ORM rows once the DB was non-empty, since plain SQLAlchemy objects
-aren't natively JSON-serializable but SQLModel/Pydantic ones are), a more
-realistic mock generator (hub-and-spoke network topology instead of a flat
-random coin flip, weighted severities instead of uniform-random), and real
-JWT auth on /api/audit specifically.
-
-/api/audit previously had NO authentication at all - anyone could POST to
-it and forge a blockchain risk-acceptance entry under any name, with any
-dollar figure, and it only ever printed to the console (lost on restart).
-It now requires a bearer token (POST /api/auth/login first) and persists
-the decision to the database. This is the one BREAKING change here: the
-frontend's "Accept Risk" button needs to attach an Authorization header
-before this will work. Every other endpoint is left exactly as open as it
-was, so nothing else that's already calling this breaks.
-
-Run locally from the repo root (so the quant-engine/ai-agent sys.path
-lookup below resolves correctly):
-    uvicorn backend.main:app --reload --port 8000
+Merged from two branches off the same base (12462e7):
+- Siddharth's pushes: richer /api/simulate-risk risk math driven off the
+  CMDB/telemetry fields, the "blast radius" network-effective vulnerability
+  calc, the SEBI Cyber Capability Index block, the RBI board_approved flag,
+  and contextual DPDP triggering (PII assets with high effective
+  vulnerability auto-flag DPDP applicability).
+- This branch: the real (non-mock) LLM-backed /api/chat streaming fix, the
+  real web3 blockchain client against a LOCAL Hardhat node (kept instead
+  of Siddharth's Sepolia client for live-demo reliability - no wallet/RPC
+  key/network dependency), and GET /api/audit-log backing the ledger page.
 """
 import os
 import sys
@@ -53,13 +40,9 @@ import monte_carlo as quant_mc
 import optimizer as quant_opt
 import graph as ai_graph
 
-# Create the database tables at import time (not deferred to a startup
-# event) - this matches the original scaffold's behavior and matters in
-# practice: several of the test scripts in tests/ do
-# `from backend.main import app` and immediately fire requests via
-# TestClient(app) with no `with` block, which does not reliably trigger a
-# FastAPI lifespan/startup event. Creating tables here guarantees they
-# exist before any request can be made, exactly like before.
+# Create the database tables at import time - several tests/ scripts do
+# `from backend.main import app` and fire requests via TestClient(app)
+# with no `with` block, which doesn't reliably trigger a startup event.
 init_db()
 
 app = FastAPI(
@@ -68,8 +51,6 @@ app = FastAPI(
     version="1.1.0",
 )
 
-# Wide open for now, matching the original scaffold - tighten before real
-# deployment.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins for dev
@@ -79,7 +60,6 @@ app.add_middleware(
 )
 
 
-# --- Pydantic Models for Requests (unchanged shapes) ---
 class ChatRequest(BaseModel):
     message: str
     context: Optional[Dict[str, Any]] = None
@@ -94,9 +74,8 @@ class AuditRequest(BaseModel):
     action: str
     risk_accepted: float
     user_id: Optional[str] = None  # accepted for backward compat, but IGNORED now - see /api/audit
+    board_approved: bool = False  # [RBI MANDATE] board oversight flag, recorded on-chain
 
-
-# --- Endpoints ---
 
 @app.get("/")
 def read_root():
@@ -105,11 +84,6 @@ def read_root():
 
 @app.post("/api/auth/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    """
-    New: issues the JWT that /api/audit now requires. Demo exec accounts
-    only (see security.py) - swap for real accounts before this is
-    anything but a hackathon demo.
-    """
     if not authenticate_demo_user(form_data.username, form_data.password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     token = create_access_token(subject=form_data.username)
@@ -118,9 +92,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.post("/api/generate-mock-data")
 def generate_mock_data(db: Session = Depends(get_db)):
-    """
-    Populates the database with mock enterprise telemetry, assets, and network topology.
-    """
     success, message = generators.populate_database(db)
     if not success:
         raise HTTPException(status_code=500, detail=message)
@@ -129,9 +100,6 @@ def generate_mock_data(db: Session = Depends(get_db)):
 
 @app.get("/api/telemetry")
 def get_telemetry(db: Session = Depends(get_db)):
-    """
-    Fetch enterprise telemetry data.
-    """
     logs = db.exec(
         select(models.TelemetryLog).order_by(models.TelemetryLog.timestamp.desc()).limit(100)
     ).all()
@@ -140,7 +108,7 @@ def get_telemetry(db: Session = Depends(get_db)):
             "status": "success",
             "data": [{
                 "id": 1,
-                "asset_id": 0,
+                "asset_id": "AST-000",
                 "vulnerability_score": 8.5,
                 "threat_level": "HIGH",
                 "edr_status": "ACTIVE",
@@ -151,11 +119,6 @@ def get_telemetry(db: Session = Depends(get_db)):
 
 @app.get("/api/topology")
 def get_topology(db: Session = Depends(get_db)):
-    """
-    Fetch the network topology Adjacency Matrix, built live from NetworkEdge
-    rows (was a cached JSON snapshot before - functionally equivalent since
-    the edges are created once during /api/generate-mock-data and read here).
-    """
     from datetime import datetime
 
     assets = db.exec(select(models.Asset)).all()
@@ -188,9 +151,6 @@ def get_topology(db: Session = Depends(get_db)):
 
 @app.post("/api/simulate-risk")
 def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
-    """
-    Trigger risk simulation. Routes data to quant-engine (Monte Carlo / Knapsack).
-    """
     assets = db.exec(select(models.Asset)).all()
     if not assets:
         raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
@@ -200,22 +160,88 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
     latest_logs = db.exec(
         select(models.TelemetryLog).order_by(models.TelemetryLog.timestamp.desc()).limit(len(assets))
     ).all()
-    avg_vulnerability = (
-        sum(log.vulnerability_score for log in latest_logs) / len(latest_logs) if latest_logs else 5.0
-    )
+    if not latest_logs:
+        latest_logs = []
 
     high_threat_count = sum(1 for log in latest_logs if log.threat_level in ("HIGH", "CRITICAL"))
     base_tef = 10.0 + (high_threat_count * 5.0)
-    avg_cs = max(10.0, 100.0 - (avg_vulnerability * 10))
+    for log in latest_logs:
+        base_tef += (log.event_frequency_24h * 0.001)
+        base_tef += (log.anomalous_access_flags * 2.0)
+        if log.cisa_kev_presence:
+            base_tef += 50.0
+        if log.incident_alert_level == "CRITICAL":
+            base_tef += 20.0
+
+    # --- BEGIN Blast Radius & Conditional Vulnerability ---
+    asset_ids = [a.id for a in assets]
+    index = {asset_id: i for i, asset_id in enumerate(asset_ids)}
+    n = len(asset_ids)
+
+    v_intrinsic = [5.0] * n
+    log_by_asset = {log.asset_id: log for log in latest_logs}
+    for i, asset in enumerate(assets):
+        log = log_by_asset.get(asset.id)
+        if log:
+            v_intrinsic[i] = log.vulnerability_score
+
+    matrix = [[0.0 for _ in range(n)] for _ in range(n)]
+    edges = db.exec(select(models.NetworkEdge)).all()
+    for edge in edges:
+        i, j = index.get(edge.source_asset_id), index.get(edge.target_asset_id)
+        if i is not None and j is not None:
+            matrix[i][j] = edge.weight
+            matrix[j][i] = edge.weight
+
+    v_eff = [0.0] * n
+    for i in range(n):
+        neighbor_sum = sum(matrix[i][j] * v_intrinsic[j] for j in range(n))
+        v_eff[i] = v_intrinsic[i] + (0.2 * neighbor_sum)  # 0.2 decay factor
+
+    avg_vulnerability = sum(v_eff) / n if n > 0 else 5.0
+    avg_cs_upstream = max(10.0, 100.0 - (avg_vulnerability * 10))
+    # --- END Blast Radius ---
+
+    deductions = 0.0
+    for log in latest_logs:
+        if not log.mfa_active:
+            deductions += 5.0
+        if log.excessive_permissions:
+            deductions += 2.0
+        if log.patch_status == "Missing Critical":
+            deductions += (log.cvss_score or 10.0)
+        if log.edr_health_status != "Healthy":
+            deductions += 4.0
+        if log.host_compromise_flags:
+            deductions += 20.0
+        if log.public_exposure_flag:
+            deductions += 15.0
+        deductions += (log.cloud_misconfigurations_count * 1.0)
+
+    avg_cs = max(5.0, avg_cs_upstream - (deductions / max(1, len(latest_logs)) if latest_logs else 0))
+
     base_plm = total_business_value * 0.05
     base_slm = total_business_value * 0.02
 
+    # --- BEGIN Contextual Statutory Triggers (DPDP Act) ---
+    is_dpdp = False
+    for i, asset in enumerate(assets):
+        if asset.data_classification == "PII" and v_eff[i] > 7.0:
+            is_dpdp = True
+            break
+
+    # Let request constraints override if specifically provided
+    if request.constraints and "is_dpdp_applicable" in request.constraints:
+        is_dpdp = request.constraints["is_dpdp_applicable"]
+    # --- END Contextual Triggers ---
+
     mc_results = quant_mc.run_fair_monte_carlo(
-        tef_min=max(5.0, base_tef - 10), tef_mode=base_tef, tef_max=base_tef + 20,
+        tef_min=max(5.0, base_tef - 20), tef_mode=base_tef, tef_max=base_tef + 50,
         tc_min=20.0, tc_mode=60.0, tc_max=95.0,
-        cs_min=max(5.0, avg_cs - 20), cs_mode=avg_cs, cs_max=min(100.0, avg_cs + 20),
+        cs_min=max(5.0, avg_cs - 15), cs_mode=avg_cs, cs_max=min(100.0, avg_cs + 10),
         plm_min=base_plm * 0.5, plm_mode=base_plm, plm_max=base_plm * 2.0,
         slm_min=base_slm * 0.5, slm_mode=base_slm, slm_max=base_slm * 2.0,
+        is_dpdp_applicable=is_dpdp,
     )
 
     # Named to match the "Strategic Controls" toggles on the dashboard
@@ -248,15 +274,13 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
             "var_95": mc_results["var_95"],
             "distribution_curve": mc_results.get("distribution_curve", []),
         },
+        "sebi_resilience": mc_results.get("sebi_resilience", {}),
         "optimization": opt_results,
     }
 
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """
-    Interface with the AI Orchestrator & Virtual CISO (Streaming).
-    """
     from langchain_core.messages import HumanMessage
 
     initial_state = {"messages": [HumanMessage(content=request.message)]}
@@ -279,11 +303,7 @@ async def chat(request: ChatRequest):
                         msgs = output.get("messages", []) if isinstance(output, dict) else []
                         # Only send the sub-agent's full final answer if we
                         # have not already streamed anything for this turn
-                        # via on_chat_model_stream above - avoids showing
-                        # nothing when token-level streaming doesn't
-                        # surface through astream_events (which is what
-                        # was happening here), while avoiding a duplicate
-                        # answer when it does.
+                        # via on_chat_model_stream above.
                         if msgs and not has_yielded:
                             has_yielded = True
                             yield msgs[-1].content
@@ -302,34 +322,35 @@ async def chat(request: ChatRequest):
     return StreamingResponse(event_stream(), media_type="text/plain")
 
 
-def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id: int):
+def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id: int, board_approved: bool = False):
     """
     Commits the risk-acceptance decision to the AuditLedger smart contract
     on a local Hardhat chain, if one is running and the contract has been
-    deployed (see blockchain_client.py for how to start it). Falls back to
-    a print()-only mock otherwise, so this endpoint keeps working for
-    anyone who isn't running Hardhat locally.
+    deployed (see blockchain_client.py). Falls back to a print()-only mock
+    otherwise. Also records the RBI board_approved flag both on-chain and
+    on the RiskDecision row.
 
     Runs as a BackgroundTask, i.e. after the HTTP response for /api/audit
-    has already gone out - the request's own `db` session is closed by
-    then, so this opens its own short-lived session to write the tx hash
-    (or lack of one) back onto the same RiskDecision row, which is what
-    GET /api/audit-log reads to show real on-chain status per decision.
+    has already gone out - opens its own short-lived session to write the
+    tx hash (or lack of one) back onto the same RiskDecision row, which is
+    what GET /api/audit-log reads to show real on-chain status per decision.
     """
     data_hash = f"decision:{decision_id}|risk:{risk}"
-    tx_hash = blockchain_client.log_risk_acceptance(action=action, data_hash=data_hash, user=user)
+    tx_hash = blockchain_client.log_risk_acceptance(
+        action=action, data_hash=data_hash, user=user, board_approved=board_approved
+    )
     if tx_hash:
         print(f"\n[BLOCKCHAIN AUDIT LOG] Committed on-chain to AuditLedger.sol. Tx hash: {tx_hash}")
-        print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
     else:
         print(f"\n[BLOCKCHAIN AUDIT LOG] (mock - no local Hardhat chain reachable) Would commit to AuditLedger.sol!")
-        print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id}\n")
+    print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id} | Board Approved: {board_approved}\n")
 
     with SessionLocal() as bg_db:
         decision = bg_db.get(models.RiskDecision, decision_id)
         if decision:
             decision.tx_hash = tx_hash
             decision.on_chain = bool(tx_hash)
+            decision.board_approved = board_approved
             bg_db.add(decision)
             bg_db.commit()
 
@@ -343,26 +364,22 @@ def log_audit(
 ):
     """
     Trigger the blockchain smart contract to log a risk acceptance event.
-
-    BREAKING CHANGE from the original scaffold: this now requires a valid
-    bearer token (POST /api/auth/login first). `decided_by` comes from the
-    verified token, never from `request.user_id` - the whole point of
-    authenticating this endpoint is that a client can't just type
-    "user_id": "ciso" into the JSON and claim to be the CISO. The decision
-    is also now persisted to the database instead of only ever hitting a
-    print() statement.
+    Requires a valid bearer token (POST /api/auth/login first). `decided_by`
+    comes from the verified token, never from `request.user_id`.
     """
     decision = models.RiskDecision(
         action=request.action,
         risk_accepted=request.risk_accepted,
         decided_by=current_user,
+        board_approved=request.board_approved,
     )
     db.add(decision)
     db.commit()
     db.refresh(decision)
 
     background_tasks.add_task(
-        trigger_blockchain_webhook, request.action, request.risk_accepted, current_user, decision.id
+        trigger_blockchain_webhook,
+        request.action, request.risk_accepted, current_user, decision.id, request.board_approved,
     )
 
     return {
@@ -371,6 +388,7 @@ def log_audit(
         "action": request.action,
         "decision_id": decision.id,
         "decided_by": current_user,
+        "board_approved": request.board_approved,
     }
 
 
@@ -379,9 +397,8 @@ def get_audit_log(db: Session = Depends(get_db)):
     """
     Lists every risk-acceptance decision on record, most recent first -
     backs the "View Detailed Ledger" page. Each row also reports whether
-    it actually made it onto the local blockchain (tx_hash/on_chain),
-    which trigger_blockchain_webhook fills in shortly after the decision
-    is created.
+    it made it onto the local blockchain (tx_hash/on_chain) and whether
+    board approval was recorded (board_approved).
     """
     decisions = db.exec(
         select(models.RiskDecision).order_by(models.RiskDecision.created_at.desc()).limit(200)

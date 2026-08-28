@@ -1,15 +1,6 @@
 """
 Mock enterprise telemetry + network topology generator, called by
 POST /api/generate-mock-data.
-
-Same external behavior as the original scaffold (clears and repopulates
-Asset/telemetry/network data, returns (success, message)), rebuilt with
-more realistic generation: threat levels are weighted (not uniform-random,
-so most findings are LOW/MEDIUM with a smaller tail of CRITICAL, matching
-real vuln-scan distributions), and the network topology is a hub-and-spoke
-graph per business unit instead of a flat 20%-chance random coin flip
-between every pair of assets - so /api/topology now returns something that
-actually looks like a segmented enterprise network.
 """
 import random
 from datetime import datetime, timedelta
@@ -28,6 +19,7 @@ BUSINESS_UNITS = [
 ]
 ASSET_TYPES = ["Server", "Laptop", "Database", "Gateway", "IoT_Device"]
 TELEMETRY_SOURCES = ["vulnerability_scanner", "siem", "iam", "edr", "cspm"]
+SUBNETS = ["10.0.1.", "10.0.2.", "192.168.1."]
 
 THREAT_WEIGHTS = [
     (ThreatLevel.LOW, 0.30), (ThreatLevel.MEDIUM, 0.35),
@@ -49,14 +41,33 @@ def _weighted(options):
 
 def generate_mock_assets(num_assets: int = 25) -> list:
     assets = []
-    for _ in range(num_assets):
+    for i in range(1, num_assets + 1):
         asset_type = random.choice(ASSET_TYPES)
+        ip = f"{random.choice(SUBNETS)}{random.randint(2, 254)}"
+        
+        if asset_type == "Database":
+            classification = random.choice(["PII", "PCI", "Critical"])
+            criticality = "Tier 1"
+            value = round(random.uniform(200000, 1000000), 2)
+        elif asset_type == "Gateway":
+            classification = "Public"
+            criticality = "Tier 1"
+            value = round(random.uniform(50000, 200000), 2)
+        else:
+            classification = random.choice(["Internal", "Public", "None"])
+            criticality = random.choice(["Tier 2", "Tier 3"])
+            value = round(random.uniform(5000, 50000), 2)
+
         assets.append(Asset(
+            id=f"AST-{i:03d}",
             name=f"{fake.word().capitalize()}-{asset_type}-{random.randint(100, 999)}",
             asset_type=asset_type,
             business_unit=random.choice(BUSINESS_UNITS),
-            business_value=round(random.uniform(5000, 500000), 2),
+            business_value=value,
             criticality_score=random.randint(10, 100),
+            ip_address=ip,
+            data_classification=classification,
+            business_criticality=criticality,
         ))
     return assets
 
@@ -67,67 +78,95 @@ def generate_mock_telemetry(assets: list, num_logs_per_asset: int = 10) -> list:
         for _ in range(num_logs_per_asset):
             level = _weighted(THREAT_WEIGHTS)
             timestamp = datetime.utcnow() - timedelta(days=random.randint(0, 30), hours=random.randint(0, 23))
+            
+            metadata = {
+                "scan_id": f"SCAN-{random.randint(1000, 9999)}",
+                "open_ports": random.sample([22, 80, 443, 3306, 8080], k=random.randint(1, 3)),
+                "os_version": random.choice(["Ubuntu 20.04", "Windows Server 2022", "CentOS 7", "RedHat 8"]),
+                "compliance_scope": random.sample(
+                    ["NIST CSF", "RBI Master Direction", "SEBI CSCRF"], k=random.randint(1, 2)
+                ),
+                "data_source": random.choice(["Splunk (SIEM)", "Wiz (CSPM)", "CrowdStrike (EDR)"]),
+            }
+            
+            has_cves = random.random() < 0.4
+            cves = [f"CVE-2023-{random.randint(1000,9999)}"] if has_cves else []
+            cvss = round(random.uniform(4.0, 10.0), 1) if has_cves else 0.0
+            patch = "Missing Critical" if cvss > 7.0 else "Up-to-date"
+
             logs.append(TelemetryLog(
                 asset_id=asset.id,
                 timestamp=timestamp,
-                vulnerability_score=round(random.uniform(*SCORE_RANGES[level]), 1),
+                vulnerability_score=cvss if has_cves else round(random.uniform(*SCORE_RANGES[level]), 1),
                 threat_level=level,
                 edr_status=_weighted(EDR_WEIGHTS),
                 source=random.choice(TELEMETRY_SOURCES),
-                metadata_log={
-                    "scan_id": f"SCAN-{random.randint(1000, 9999)}",
-                    "open_ports": random.sample([22, 80, 443, 3306, 8080], k=random.randint(1, 3)),
-                    "os_version": random.choice(["Ubuntu 20.04", "Windows Server 2022", "CentOS 7", "RedHat 8"]),
-                    "compliance_scope": random.sample(
-                        ["NIST CSF", "RBI Master Direction", "SEBI CSCRF"], k=random.randint(1, 2)
-                    ),
-                },
+                metadata_log=metadata,
+                
+                cve_ids=cves,
+                cvss_score=cvss,
+                patch_status=patch,
+                event_frequency_24h=random.randint(10, 5000),
+                anomalous_access_flags=random.randint(0, 5),
+                incident_alert_level=random.choice(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+                privilege_level=random.choice(["Admin", "Standard"]),
+                excessive_permissions=random.random() < 0.2,
+                mfa_active=random.random() > 0.1,
+                edr_health_status=random.choice(["Healthy", "Warning", "Offline"]),
+                host_compromise_flags=random.random() < 0.05,
+                malware_alerts_24h=random.randint(0, 3),
+                public_exposure_flag=(asset.data_classification == "Public"),
+                cloud_misconfigurations_count=random.randint(0, 10),
+                cisa_kev_presence=(cvss > 8.0 and random.random() < 0.3),
+                threat_actor_chatter=random.choice(["None", "Low", "High"]),
             ))
     return logs
 
 
 def generate_network_edges(assets: list, extra_cross_unit_edges: int = 8) -> list:
-    """Hub-and-spoke per business unit, plus a few cross-unit links for
-    shared services - mirrors real network segmentation."""
+    """Network topology based on CMDB subnets, classifications, and business units."""
     edges = []
-    by_unit = {}
-    for asset in assets:
-        by_unit.setdefault(asset.business_unit, []).append(asset)
-
-    hubs = []
-    for unit_assets in by_unit.values():
-        if not unit_assets:
-            continue
-        hub = max(unit_assets, key=lambda a: a.criticality_score)
-        hubs.append(hub)
-        for asset in unit_assets:
-            if asset.id == hub.id:
-                continue
-            edges.append(NetworkEdge(
-                source_asset_id=asset.id, target_asset_id=hub.id,
-                weight=round(random.uniform(0.4, 1.0), 2),
-            ))
-
-    if len(hubs) > 1:
-        max_possible = len(hubs) * (len(hubs) - 1) // 2
-        used = set()
-        for _ in range(min(extra_cross_unit_edges, max_possible)):
-            for _attempt in range(10):
-                a, b = random.sample(hubs, 2)
-                pair = frozenset((a.id, b.id))
+    used = set()
+    num_assets = len(assets)
+    
+    for i in range(num_assets):
+        for j in range(i + 1, num_assets):
+            a1 = assets[i]
+            a2 = assets[j]
+            
+            connected = False
+            # 1. Gateway/Public assets connect to everything in their subnet
+            if (a1.data_classification == "Public" or a2.data_classification == "Public") and (a1.ip_address and a2.ip_address and a1.ip_address[:6] == a2.ip_address[:6]):
+                connected = True
+            
+            # 2. Tier 1 assets only talk to each other if they are on same subnet
+            elif a1.business_criticality == "Tier 1" and a2.business_criticality == "Tier 1":
+                if a1.ip_address and a2.ip_address and a1.ip_address[:7] == a2.ip_address[:7]:
+                    connected = True
+                    
+            # 3. Hub-and-spoke fallback (Upstream Logic)
+            elif a1.business_unit == a2.business_unit:
+                if random.random() < 0.2:
+                    connected = True
+            
+            # 4. Default minor cross-talk
+            elif random.random() < 0.05:
+                connected = True
+                
+            if connected:
+                pair = frozenset((a1.id, a2.id))
                 if pair not in used:
                     used.add(pair)
                     edges.append(NetworkEdge(
-                        source_asset_id=a.id, target_asset_id=b.id,
-                        weight=round(random.uniform(0.1, 0.5), 2),
+                        source_asset_id=a1.id, 
+                        target_asset_id=a2.id,
+                        weight=round(random.uniform(0.4, 1.0), 2),
                     ))
-                    break
     return edges
 
 
 def populate_database(db: Session):
-    """Clear and repopulate Asset/TelemetryLog/NetworkEdge with fresh mock
-    data. Returns (success: bool, message: str), same as the original."""
+    """Clear and repopulate Asset/TelemetryLog/NetworkEdge with fresh mock data."""
     try:
         db.execute(delete(TelemetryLog))
         db.execute(delete(NetworkEdge))

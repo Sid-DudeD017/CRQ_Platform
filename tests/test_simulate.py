@@ -1,14 +1,20 @@
-import requests
+import sys
+import os
+from fastapi.testclient import TestClient
 
-url = "http://127.0.0.1:8000/api/simulate-risk"
-payload = {
-    "budget": 20000.0,
-    "constraints": {}
-}
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(project_root)
 
-try:
-    response = requests.post(url, json=payload)
-    print(response.status_code)
-    print(response.json())
-except Exception as e:
-    print(e)
+from backend.main import app
+
+client = TestClient(app)
+
+print("Simulating risk...")
+response = client.post("/api/simulate-risk", json={"budget": 1000000})
+print(response.status_code)
+# print keys to verify
+if response.status_code == 200:
+    print(response.json().keys())
+    print("Success!")
+else:
+    print(response.text)

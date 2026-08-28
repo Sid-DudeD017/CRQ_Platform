@@ -8,14 +8,9 @@ def run_fair_monte_carlo(
     cs_min: float, cs_mode: float, cs_max: float,     # Control Strength (0 to 100)
     plm_min: float, plm_mode: float, plm_max: float,  # Primary Loss Magnitude
     slm_min: float, slm_mode: float, slm_max: float,  # Secondary Loss Magnitude
-    num_simulations: int = 10000
+    num_simulations: int = 10000,
+    is_dpdp_applicable: bool = False                  # Flag for Native Indian Regulatory Grounding
 ) -> Dict[str, Any]:
-    """
-    Runs a rigorous FAIR-based Monte Carlo simulation.
-    Calculates Loss Event Frequency (LEF) from Threat Event Frequency (TEF) and Vulnerability.
-    Calculates Probable Loss Magnitude (PLM) from Primary and Secondary losses.
-    Generates Value at Risk distribution curves using SciPy/NumPy.
-    """
     # 1. Simulate Threat Event Frequency (TEF)
     tef = np.random.triangular(tef_min, tef_mode, tef_max, num_simulations)
     
@@ -31,7 +26,19 @@ def run_fair_monte_carlo(
     
     # 4. Simulate Probable Loss Magnitude (PLM) = Primary + Secondary Loss
     primary_loss = np.random.triangular(plm_min, plm_mode, plm_max, num_simulations)
-    secondary_loss = np.random.triangular(slm_min, slm_mode, slm_max, num_simulations)
+    
+    if is_dpdp_applicable:
+        # [NEW DPDP MANDATE] Combine both statutory penalties
+        safeguard_penalty = 2500000000.0        # ₹250 Crores
+        breach_notification_penalty = 2000000000.0 # ₹200 Crores
+        dpdp_penalty_limit = safeguard_penalty + breach_notification_penalty # ₹450 Crores total exposure
+        
+        slm_max_adjusted = max(slm_max, dpdp_penalty_limit)
+        slm_mode_adjusted = min(slm_mode + (dpdp_penalty_limit * 0.05), slm_max_adjusted)
+        secondary_loss = np.random.triangular(slm_min, slm_mode_adjusted, slm_max_adjusted, num_simulations)
+    else:
+        secondary_loss = np.random.triangular(slm_min, slm_mode, slm_max, num_simulations)
+        
     total_loss_magnitude = primary_loss + secondary_loss
     
     # 5. Calculate Annualized Loss Expectancy (ALE)
@@ -41,6 +48,25 @@ def run_fair_monte_carlo(
     mean_loss = np.mean(annual_losses)
     var_95 = np.percentile(annual_losses, 95)
     var_99 = np.percentile(annual_losses, 99)
+    
+    # [NEW SEBI MANDATE] Calculate SEBI Cyber Capability Index (CCI)
+    # Mapping mathematical FAIR outputs to the 5 Resilience Goals (0-5 scale)
+    cci_anticipate = min(5.0, (100 - np.mean(tef)) / 20)
+    cci_withstand = np.mean(control_str) / 20
+    cci_contain = min(5.0, 5.0 * (10000000 / max(1, np.mean(secondary_loss))))
+    cci_recover = min(5.0, 5.0 * (5000000 / max(1, np.mean(primary_loss))))
+    
+    cci_score = (cci_anticipate + cci_withstand + cci_contain + cci_recover) / 4.0
+    cci_evolve = min(5.0, cci_score * 1.1) # Evolution metric
+    
+    sebi_resilience = {
+        "cci_score": float(cci_score),
+        "anticipate": float(cci_anticipate),
+        "withstand": float(cci_withstand),
+        "contain": float(cci_contain),
+        "recover": float(cci_recover),
+        "evolve": float(cci_evolve)
+    }
     
     # 7. Generate Value at Risk Distribution Curve (SciPy KDE)
     kde = gaussian_kde(annual_losses)
@@ -54,5 +80,6 @@ def run_fair_monte_carlo(
         "mean_expected_loss": float(mean_loss),
         "var_95": float(var_95),
         "var_99": float(var_99),
-        "distribution_curve": curve
+        "distribution_curve": curve,
+        "sebi_resilience": sebi_resilience
     }

@@ -22,6 +22,7 @@ export default function ExecutiveDashboard() {
         setControls((prev) => ({ ...prev, [name]: !prev[name] }));
     };
     const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
+    const [isApproving, setIsApproving] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
     const [chatInput, setChatInput] = useState('');
@@ -91,6 +92,44 @@ export default function ExecutiveDashboard() {
             showToast('Error contacting backend. Is it running on port 8000?', 'error');
         } finally {
             setAcceptingRiskFor(null);
+        }
+    };
+
+    // Logs the AI-optimized patch plan as a single board-approved audit
+    // decision (in addition to accepting/rejecting individual risks above) -
+    // ports Siddharth's "Approve & Log" idea onto the real auth/toast
+    // plumbing instead of a hardcoded re-login on every click.
+    const approveOptimizer = async () => {
+        if (!simResults?.optimization) return;
+        if (!token) {
+            showToast('Please log in first (top-right corner) before approving the plan.', 'error');
+            return;
+        }
+        setIsApproving(true);
+        try {
+            const res = await fetch('http://localhost:8000/api/audit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    action: `Approve AI Optimization Plan: ${(simResults.optimization.selected_patches || []).join(', ')}`,
+                    risk_accepted: simResults.optimization.total_cost || 0,
+                    board_approved: true,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
+                return;
+            }
+            showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
+        } catch (e) {
+            console.error(e);
+            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+        } finally {
+            setIsApproving(false);
         }
     };
 
@@ -167,7 +206,7 @@ export default function ExecutiveDashboard() {
 <div>
 <div key={simResults ? 'loaded-ale' : 'default-ale'} className="flex items-baseline gap-2 animate-fade-scale-in">
 <span className="font-display-lg text-display-lg text-primary tracking-tighter">
-  ₹{simResults ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
+  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
 </span>
 <span className="font-headline-sm text-headline-sm text-on-surface-variant">Cr</span>
 </div>
@@ -182,7 +221,7 @@ export default function ExecutiveDashboard() {
 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
 <div className="font-headline-md text-headline-md text-primary font-data-mono">
-  ₹{simResults ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
+  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
 </div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
 </div>
@@ -197,7 +236,7 @@ export default function ExecutiveDashboard() {
 <h3 className="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
 <div className="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
-{simResults && simResults.monte_carlo.distribution_curve ? (
+{simResults && simResults.monte_carlo && simResults.monte_carlo.distribution_curve ? (
     <ResponsiveContainer width="100%" height={150}>
         <AreaChart data={simResults.monte_carlo.distribution_curve} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
@@ -247,7 +286,23 @@ export default function ExecutiveDashboard() {
 <hr className="border-outline-variant border-dashed" />
 {/*  Strategic Controls  */}
 <div>
-<h4 className="font-body-sm text-body-sm font-semibold mb-stack-md">Strategic Controls</h4>
+<div className="flex justify-between items-center mb-stack-md">
+  <h4 className="font-body-sm text-body-sm font-semibold">Strategic Controls</h4>
+  {simResults?.optimization?.total_cost ? (
+    <div className="flex items-center gap-2">
+      <span className="font-label-caps text-label-caps text-on-surface-variant">
+        Optimized Cost: ₹{Number(simResults.optimization.total_cost).toLocaleString()}
+      </span>
+      <button
+        onClick={approveOptimizer}
+        disabled={isApproving}
+        className="px-3 py-1 bg-[#15803d] text-white rounded font-label-caps text-label-caps font-semibold hover:bg-opacity-90 disabled:opacity-50 transition-colors active:scale-95"
+      >
+        {isApproving ? 'Logging...' : 'Approve & Log'}
+      </button>
+    </div>
+  ) : null}
+</div>
 <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-md">
 <div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
 <div className="flex flex-col">

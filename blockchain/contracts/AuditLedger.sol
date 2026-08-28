@@ -9,11 +9,12 @@ contract AuditLedger {
         string action;
         string dataHash;
         string user;
+        bool boardApproved; // [NEW RBI MANDATE] Board oversight flag
     }
 
     AuditRecord[] public ledger;
 
-    event RiskAccepted(uint256 indexed timestamp, string action, string dataHash, string user);
+    event RiskAccepted(uint256 indexed timestamp, string action, string dataHash, string user, bool boardApproved);
 
     modifier onlyServer() {
         require(msg.sender == authorizedServer, "Unauthorized: Only FastAPI server can log audits");
@@ -25,24 +26,25 @@ contract AuditLedger {
         authorizedServer = msg.sender;
     }
 
-    function logRiskAcceptance(string memory _action, string memory _dataHash, string memory _user) public onlyServer {
+    function logRiskAcceptance(string memory _action, string memory _dataHash, string memory _user, bool _boardApproved) public onlyServer {
         ledger.push(AuditRecord({
             timestamp: block.timestamp,
             action: _action,
             dataHash: _dataHash,
-            user: _user
+            user: _user,
+            boardApproved: _boardApproved
         }));
 
-        emit RiskAccepted(block.timestamp, _action, _dataHash, _user);
+        emit RiskAccepted(block.timestamp, _action, _dataHash, _user, _boardApproved);
     }
 
     function getRecordCount() public view returns (uint256) {
         return ledger.length;
     }
 
-    function getRecord(uint256 index) public view returns (uint256, string memory, string memory, string memory) {
+    function getRecord(uint256 index) public view returns (uint256, string memory, string memory, string memory, bool) {
         require(index < ledger.length, "Index out of bounds");
         AuditRecord memory record = ledger[index];
-        return (record.timestamp, record.action, record.dataHash, record.user);
+        return (record.timestamp, record.action, record.dataHash, record.user, record.boardApproved);
     }
 }

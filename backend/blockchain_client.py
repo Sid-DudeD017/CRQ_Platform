@@ -69,18 +69,20 @@ def _get_contract():
     return _contract
 
 
-def log_risk_acceptance(action: str, data_hash: str, user: str) -> Optional[str]:
+def log_risk_acceptance(action: str, data_hash: str, user: str, board_approved: bool = False) -> Optional[str]:
     """
-    Calls AuditLedger.logRiskAcceptance(action, data_hash, user) on the
-    local Hardhat chain. Returns the transaction hash (hex string) on
-    success, or None if no local chain / deployed contract is reachable.
+    Calls AuditLedger.logRiskAcceptance(action, data_hash, user, board_approved)
+    on the local Hardhat chain (4-arg signature per Siddharth's RBI-mandate
+    contract update - board_approved is recorded on-chain). Returns the
+    transaction hash (hex string) on success, or None if no local chain /
+    deployed contract is reachable.
     """
     contract = _get_contract()
     if contract is None:
         return None
 
     try:
-        tx = contract.functions.logRiskAcceptance(action, data_hash, user).build_transaction({
+        tx = contract.functions.logRiskAcceptance(action, data_hash, user, board_approved).build_transaction({
             "from": _account.address,
             "nonce": _w3.eth.get_transaction_count(_account.address),
         })
