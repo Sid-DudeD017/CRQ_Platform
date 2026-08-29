@@ -1,18 +1,20 @@
-import subprocess
-import time
-import urllib.request
-import json
+import requests
 
-proc = subprocess.Popen(["./venv/bin/uvicorn", "backend.main:app", "--port", "8004"])
-time.sleep(3)
+# 1. Login to get token
+res = requests.post("http://localhost:8000/api/auth/login", data={"username": "ciso", "password": "password"})
+if res.status_code != 200:
+    print("Login failed:", res.text)
+    token = "fake_token"
+else:
+    token = res.json().get("access_token")
 
-try:
-    req = urllib.request.Request("http://127.0.0.1:8004/api/audit", method="POST", headers={"Content-Type": "application/json"})
-    data = json.dumps({"action": "Accept Payment Risk", "risk_accepted": 1200000, "user_id": "CISO_123", "board_approved": True}).encode("utf-8")
-    with urllib.request.urlopen(req, data=data) as f:
-        print("Status:", f.status)
-        print("Response:", f.read().decode("utf-8"))
-except Exception as e:
-    print("Error:", e)
-
-proc.terminate()
+# 2. Accept Risk
+headers = {"Authorization": f"Bearer {token}"}
+payload = {
+    "action": "Accept residual risk: Payment Processing",
+    "risk_accepted": 20000000,
+    "user_id": "ciso",
+    "board_approved": True
+}
+res2 = requests.post("http://localhost:8000/api/audit", json=payload, headers=headers)
+print("Audit response:", res2.status_code, res2.text)
