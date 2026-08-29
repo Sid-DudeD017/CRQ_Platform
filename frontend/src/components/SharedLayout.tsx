@@ -52,6 +52,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     const navItems = [
         { path: '/', icon: 'dashboard', label: 'Overview' },
         { path: '/optimize', icon: 'trending_up', label: 'Investment' },
+        { path: '/ledger', icon: 'receipt_long', label: 'Ledger' },
         { path: '/ingestion', icon: 'input', label: 'Ingestion' },
         { path: '/training', icon: 'model_training', label: 'Training' },
         { path: '/reports', icon: 'assessment', label: 'Reports' },
@@ -60,7 +61,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     return (
         <div className="bg-background text-on-background font-body-md min-h-screen flex flex-col">
             {/* TopNavBar */}
-            <nav className="bg-surface border-b border-outline-variant docked full-width top-0 z-50">
+            <nav className="bg-surface border-b border-outline-variant docked full-width top-0 z-50 shadow-[0_2px_12px_-6px_rgba(0,0,0,0.12)]">
                 <div className="flex justify-between items-center w-full px-container-padding max-w-[1440px] mx-auto h-16">
                     <div className="flex items-center gap-gutter">
                         <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
@@ -109,8 +110,8 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 {loginError && <span className="text-error text-label-caps">{loginError}</span>}
                             </div>
                         )}
-                        <div className="w-8 h-8 rounded-full bg-surface-variant overflow-hidden border border-outline-variant ml-2">
-                            <img alt="User profile" className="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAC93YQQAb6_mPCcL0xS7VsO6k1um5wx1WcfYdlqwFufL5n4rRrFRGN8nRW8FqQlpxhXQbCLi317DOn09gFsNmQJJCromPSWQaDpl_sp8HG-mllU_Sd-RHFbNHwyPy02ohVNfTWwSilvB3qL5YnuGTw0bd9ftYWAOdvvrox_QcjjqC-53Fhs81jY7-6K03IMoI2IoBuuoHNaQ_d_AIEioAjjVr-QyrmwEAza66936YZqrNbTUH7-ZiKRg" />
+                        <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container border border-outline-variant ml-2 flex items-center justify-center font-label-caps text-label-caps font-bold">
+                            {(username || 'Guest').slice(0, 2).toUpperCase()}
                         </div>
                     </div>
                 </div>
@@ -134,7 +135,8 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             {navItems.map((item) => {
                                 const isActive = pathname === item.path;
                                 return (
-                                    <Link key={item.path} href={item.path} className={`flex items-center gap-stack-sm px-3 py-2 rounded-lg font-label-caps text-label-caps transition-transform duration-150 active:scale-95 ${isActive ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
+                                    <Link key={item.path} href={item.path} className={`relative flex items-center gap-stack-sm px-3 py-2 rounded-lg font-label-caps text-label-caps transition-all duration-150 active:scale-95 ${isActive ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
+                                        {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-primary" />}
                                         <span className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
                                     </Link>
                                 );
@@ -255,7 +257,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
             {/* Footer */}
             <footer className="bg-surface border-t border-outline-variant docked full-width bottom-0 z-40">
                 <div className="flex flex-col md:flex-row justify-between items-center w-full px-container-padding py-stack-md max-w-[1440px] mx-auto gap-stack-sm">
-                    <span className="font-label-caps text-label-caps text-on-surface-variant">© 2024 CRQ Executive Minimalist. All rights reserved.</span>
+                    <span className="font-label-caps text-label-caps text-on-surface-variant">© {new Date().getFullYear()} CRQ Platform. All rights reserved.</span>
                     <div className="flex gap-gutter font-body-sm text-body-sm text-on-surface-variant">
                         <span className="cursor-pointer hover:text-primary transition-colors">Contextual Help</span>
                         <span className="cursor-pointer hover:text-primary transition-colors">Privacy Policy</span>

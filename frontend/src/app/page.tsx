@@ -196,7 +196,7 @@ export default function ExecutiveDashboard() {
 {/*  Bento Grid Layout  */}
 <div className="grid grid-cols-12 gap-gutter mb-stack-lg">
 {/*  Centerpiece: ALE  */}
-<div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+<div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between elevate">
 <div>
 <div className="flex justify-between items-start mb-stack-sm">
 <h3 className="font-title-lg text-title-lg text-primary">Annualized Loss Expectancy</h3>
@@ -219,21 +219,21 @@ export default function ExecutiveDashboard() {
 </div>
 {/*  Scorecards  */}
 <div className="col-span-12 lg:col-span-3 flex flex-col gap-gutter">
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center elevate">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
 <div className="font-headline-md text-headline-md text-primary font-data-mono">
   ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
 </div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
 </div>
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center elevate">
 <h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">Overall ROI of Spend</h4>
 <div className="font-headline-md text-headline-md text-[#15803d] font-data-mono flex items-center"><span className="material-symbols-outlined mr-1">arrow_upward</span>18%</div>
 <div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Security efficiency</div>
 </div>
 </div>
 {/*  Loss Distribution Chart  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col hover:border-primary hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col elevate">
 <h3 className="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
 <div className="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
@@ -242,8 +242,8 @@ export default function ExecutiveDashboard() {
         <AreaChart data={simResults.monte_carlo.distribution_curve} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
                 <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#82ca9d" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#82ca9d" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.45}/>
+                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
                 </linearGradient>
             </defs>
             <XAxis dataKey="loss" hide={true} />
@@ -252,7 +252,7 @@ export default function ExecutiveDashboard() {
                 formatter={(value: any, name: any, props: any) => [`${(props.payload.loss / 10000000).toFixed(2)} Cr`, 'Loss']}
                 labelFormatter={() => ''}
             />
-            <Area type="monotone" dataKey="probability" stroke="#82ca9d" fillOpacity={1} fill="url(#colorLoss)" />
+            <Area type="monotone" dataKey="probability" stroke="var(--primary)" strokeWidth={2} fillOpacity={1} fill="url(#colorLoss)" />
         </AreaChart>
     </ResponsiveContainer>
 ) : (
@@ -266,7 +266,7 @@ export default function ExecutiveDashboard() {
 {/*  Bottom Row: Sandbox & Breakdown  */}
 <div className="grid grid-cols-12 gap-gutter">
 {/*  What-If Sandbox  */}
-<div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary hover:shadow-lg transition-all duration-200">
+<div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
 <div className="flex justify-between items-center mb-stack-lg">
 <h3 className="font-title-lg text-title-lg text-primary">Simulation Sandbox</h3>
 <span className="bg-secondary-container text-on-secondary-container px-2 py-1 rounded font-label-caps text-label-caps">Draft Mode</span>
@@ -365,7 +365,7 @@ export default function ExecutiveDashboard() {
 </div>
 </div>
 {/*  Strategic Breakdown  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter hover:border-primary hover:shadow-lg transition-all duration-200">
+<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
 <h3 className="font-title-lg text-title-lg text-primary mb-stack-lg">Risk by Business Unit</h3>
 <div className="space-y-4">
 {/*  Unit 1  */}
@@ -424,7 +424,7 @@ export default function ExecutiveDashboard() {
                 <span className="material-symbols-outlined">close</span>
             </button>
         </div>
-        <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2">
+        <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2 custom-scrollbar">
             {chatMessages.length === 0 && (
                 <div className="text-on-surface-variant text-body-sm text-center mt-4">
                     Ask me about the risk simulation or compliance frameworks...

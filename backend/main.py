@@ -30,7 +30,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from . import blockchain_client, generators, models
+from . import blockchain_client, generators, models, risk_engine
 from .database import SessionLocal, get_db, init_db
 from .security import authenticate_demo_user, create_access_token, get_current_user
 
@@ -172,109 +172,19 @@ def get_topology(db: Session = Depends(get_db)):
 @app.post("/api/simulate-risk")
 @limiter.limit("10/minute")
 def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depends(get_db)):
-    assets = db.exec(select(models.Asset)).all()
-    if not assets:
+    dpdp_override = None
+    if payload.constraints and "is_dpdp_applicable" in payload.constraints:
+        dpdp_override = payload.constraints["is_dpdp_applicable"]
+
+    # Shared with the Virtual CISO chatbot's tools (ai-agent/tools.py) via
+    # backend/risk_engine.py - see that module's docstring for why this is
+    # no longer computed independently in two places.
+    inputs = risk_engine.derive_fair_inputs(db, dpdp_override=dpdp_override)
+    if inputs is None:
         raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
 
-    total_business_value = sum(a.business_value for a in assets)
-
-    latest_logs = db.exec(
-        select(models.TelemetryLog).order_by(models.TelemetryLog.timestamp.desc()).limit(len(assets))
-    ).all()
-    if not latest_logs:
-        latest_logs = []
-
-    high_threat_count = sum(1 for log in latest_logs if log.threat_level in ("HIGH", "CRITICAL"))
-    base_tef = 10.0 + (high_threat_count * 5.0)
-    for log in latest_logs:
-        base_tef += (log.event_frequency_24h * 0.001)
-        base_tef += (log.anomalous_access_flags * 2.0)
-        if log.cisa_kev_presence:
-            base_tef += 50.0
-        if log.incident_alert_level == "CRITICAL":
-            base_tef += 20.0
-
-    # --- BEGIN Blast Radius & Conditional Vulnerability ---
-    asset_ids = [a.id for a in assets]
-    index = {asset_id: i for i, asset_id in enumerate(asset_ids)}
-    n = len(asset_ids)
-
-    v_intrinsic = [5.0] * n
-    log_by_asset = {log.asset_id: log for log in latest_logs}
-    for i, asset in enumerate(assets):
-        log = log_by_asset.get(asset.id)
-        if log:
-            v_intrinsic[i] = log.vulnerability_score
-
-    matrix = [[0.0 for _ in range(n)] for _ in range(n)]
-    edges = db.exec(select(models.NetworkEdge)).all()
-    for edge in edges:
-        i, j = index.get(edge.source_asset_id), index.get(edge.target_asset_id)
-        if i is not None and j is not None:
-            matrix[i][j] = edge.weight
-            matrix[j][i] = edge.weight
-
-    v_eff = [0.0] * n
-    for i in range(n):
-        neighbor_sum = sum(matrix[i][j] * v_intrinsic[j] for j in range(n))
-        v_eff[i] = v_intrinsic[i] + (0.2 * neighbor_sum)  # 0.2 decay factor
-
-    avg_vulnerability = sum(v_eff) / n if n > 0 else 5.0
-    avg_cs_upstream = max(10.0, 100.0 - (avg_vulnerability * 10))
-    # --- END Blast Radius ---
-
-    deductions = 0.0
-    for log in latest_logs:
-        if not log.mfa_active:
-            deductions += 5.0
-        if log.excessive_permissions:
-            deductions += 2.0
-        if log.patch_status == "Missing Critical":
-            deductions += (log.cvss_score or 10.0)
-        if log.edr_health_status != "Healthy":
-            deductions += 4.0
-        if log.host_compromise_flags:
-            deductions += 20.0
-        if log.public_exposure_flag:
-            deductions += 15.0
-        deductions += (log.cloud_misconfigurations_count * 1.0)
-
-    avg_cs = max(5.0, avg_cs_upstream - (deductions / max(1, len(latest_logs)) if latest_logs else 0))
-
-    base_plm = total_business_value * 0.05
-    base_slm = total_business_value * 0.02
-
-    # --- BEGIN Contextual Statutory Triggers (DPDP Act) ---
-    is_dpdp = False
-    for i, asset in enumerate(assets):
-        if asset.data_classification == "PII" and v_eff[i] > 7.0:
-            is_dpdp = True
-            break
-
-    # Let request constraints override if specifically provided
-    if payload.constraints and "is_dpdp_applicable" in payload.constraints:
-        is_dpdp = payload.constraints["is_dpdp_applicable"]
-    # --- END Contextual Triggers ---
-
-    mc_results = quant_mc.run_fair_monte_carlo(
-        tef_min=max(5.0, base_tef - 20), tef_mode=base_tef, tef_max=base_tef + 50,
-        tc_min=20.0, tc_mode=60.0, tc_max=95.0,
-        cs_min=max(5.0, avg_cs - 15), cs_mode=avg_cs, cs_max=min(100.0, avg_cs + 10),
-        plm_min=base_plm * 0.5, plm_mode=base_plm, plm_max=base_plm * 2.0,
-        slm_min=base_slm * 0.5, slm_mode=base_slm, slm_max=base_slm * 2.0,
-        is_dpdp_applicable=is_dpdp,
-    )
-
-    # Named to match the "Strategic Controls" toggles on the dashboard
-    # (frontend/src/app/page.tsx) exactly, so the frontend can highlight
-    # whichever ones the optimizer actually recommends for the chosen
-    # budget instead of those toggles being purely decorative.
-    dummy_patches = [
-        {"id": "Enforce Cloud MFA", "cost": 4500000, "risk_reduction": 18000000},
-        {"id": "Patch Payment Gateway", "cost": 12000000, "risk_reduction": 40000000},
-        {"id": "Zero Trust Architecture", "cost": 35000000, "risk_reduction": 90000000},
-    ]
-    opt_results = quant_opt.optimize_budget(dummy_patches, payload.budget)
+    mc_results = quant_mc.run_fair_monte_carlo(**inputs)
+    opt_results = quant_opt.optimize_budget(risk_engine.DUMMY_PATCHES, payload.budget)
 
     sim_record = models.RiskSimulation(
         expected_annual_loss=mc_results["mean_expected_loss"],

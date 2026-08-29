@@ -1,5 +1,7 @@
 import sys
 import os
+from typing import Optional
+
 from langchain_core.tools import tool
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -8,37 +10,51 @@ sys.path.append(project_root) # to access backend module
 
 import monte_carlo as quant_mc
 import optimizer as quant_opt
+from backend import risk_engine
+from backend.database import SessionLocal
+
 
 @tool
 def optimize_budget(budget: float) -> str:
     """
     Calls the Quant Engine's Knapsack Optimizer to maximize Return on Security Investment (ROSI).
     Use this when the user wants to know how best to spend their security budget.
+
+    Uses the exact same three priced controls (Enforce Cloud MFA, Patch Payment Gateway, Zero
+    Trust Architecture) shown on the dashboard's Optimizer page - previously this tool had its
+    own fictional, dollar-scale patch list that never matched what the app actually showed for
+    the same budget.
     """
-    dummy_patches = [
-        {"id": "PATCH-001 (Firewall)", "cost": 5000, "risk_reduction": 20000},
-        {"id": "PATCH-002 (EDR Upgrade)", "cost": 15000, "risk_reduction": 60000},
-        {"id": "PATCH-003 (IAM Sync)", "cost": 8000, "risk_reduction": 25000},
-        {"id": "PATCH-004 (Zero-Trust Proxy)", "cost": 25000, "risk_reduction": 100000},
-    ]
-    
-    opt_results = quant_opt.optimize_budget(dummy_patches, budget)
-    return f"Optimized budget for ${budget}: {opt_results}"
+    opt_results = quant_opt.optimize_budget(risk_engine.DUMMY_PATCHES, budget)
+    return f"Optimized budget for ₹{budget:,.0f}: {opt_results}"
+
 
 @tool
-def run_monte_carlo_var(is_dpdp_applicable: bool = True) -> str:
+def run_monte_carlo_var(is_dpdp_applicable: Optional[bool] = None) -> str:
     """
-    Triggers the FAIR Monte Carlo Engine to generate Value at Risk (VaR) distribution curves.
+    Triggers the FAIR Monte Carlo Engine to generate Value at Risk (VaR) distribution curves,
+    using the SAME live telemetry-derived inputs as the dashboard's Overview page (blast-radius
+    vulnerability, control-strength deductions, contextual DPDP trigger) - not a fixed made-up
+    range. Pass is_dpdp_applicable to override the automatic DPDP trigger; leave it unset to use
+    whatever the live telemetry actually implies.
     """
-    mc_results = quant_mc.run_fair_monte_carlo(
-        tef_min=10.0, tef_mode=50.0, tef_max=100.0,
-        tc_min=20.0, tc_mode=60.0, tc_max=95.0,
-        cs_min=30.0, cs_mode=50.0, cs_max=80.0,
-        plm_min=10000.0, plm_mode=50000.0, plm_max=250000.0,
-        slm_min=5000.0, slm_mode=20000.0, slm_max=100000.0,
-        is_dpdp_applicable=is_dpdp_applicable
+    db = SessionLocal()
+    try:
+        inputs = risk_engine.derive_fair_inputs(db, dpdp_override=is_dpdp_applicable)
+    finally:
+        db.close()
+
+    if inputs is None:
+        return "No assets found in the database yet - run mock data generation first (POST /api/generate-mock-data)."
+
+    mc_results = quant_mc.run_fair_monte_carlo(**inputs)
+    sebi = mc_results.get("sebi_resilience", {})
+    return (
+        f"Monte Carlo Results (live telemetry): Mean Expected Loss = ₹{mc_results['mean_expected_loss']:,.0f}, "
+        f"95th Percentile VaR = ₹{mc_results['var_95']:,.0f}, "
+        f"SEBI Cyber Capability Index = {sebi.get('cci_score', 0):.2f}/5"
     )
-    return f"Monte Carlo Results: Mean Expected Loss = ${mc_results['mean_expected_loss']:,.2f}, 95th Percentile VaR = ${mc_results['var_95']:,.2f}"
+
 
 @tool
 def query_telemetry(query: str) -> str:
@@ -54,7 +70,7 @@ def query_telemetry(query: str) -> str:
         db.close()
         if not logs:
             return "No telemetry logs found in the database. Please run mock data generation."
-        
+
         results = []
         for log in logs:
             results.append(f"Asset: {log.asset_id}, Vulnerability: {log.vulnerability_score}, Threat: {log.threat_level}, EDR: {log.edr_status}")
