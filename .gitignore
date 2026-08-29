@@ -3,6 +3,7 @@ frontend/node_modules/
 frontend/.next/
 frontend/.swc/
 frontend/out/
+frontend/tsconfig.tsbuildinfo
 npm-debug.log*
 
 # Hardhat (blockchain) - node_modules and compiler build output, both

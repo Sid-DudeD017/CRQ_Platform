@@ -20,7 +20,10 @@ import os
 import sys
 from typing import Any, Dict, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -51,9 +54,26 @@ app = FastAPI(
     version="1.1.0",
 )
 
+# Rate limiting - protects the unauthenticated, expensive/abusable endpoints
+# (Monte Carlo simulation, the LLM-backed chat) now that this backend sits
+# on a public URL. Keyed by client IP; limits are generous enough for a
+# real demo user but stop a script from hammering the free-tier instance
+# or burning through the Groq quota.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS - explicit allowlist instead of "*". ALLOWED_ORIGINS is a
+# comma-separated env var (set it on Render to your real Vercel domain);
+# these two are sane defaults for local dev and the current deployment.
+_default_origins = "http://localhost:3000,https://crq-platform.vercel.app"
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for dev
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,7 +111,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.post("/api/generate-mock-data")
-def generate_mock_data(db: Session = Depends(get_db)):
+def generate_mock_data(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     success, message = generators.populate_database(db)
     if not success:
         raise HTTPException(status_code=500, detail=message)
@@ -150,7 +170,8 @@ def get_topology(db: Session = Depends(get_db)):
 
 
 @app.post("/api/simulate-risk")
-def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depends(get_db)):
     assets = db.exec(select(models.Asset)).all()
     if not assets:
         raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
@@ -231,8 +252,8 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
             break
 
     # Let request constraints override if specifically provided
-    if request.constraints and "is_dpdp_applicable" in request.constraints:
-        is_dpdp = request.constraints["is_dpdp_applicable"]
+    if payload.constraints and "is_dpdp_applicable" in payload.constraints:
+        is_dpdp = payload.constraints["is_dpdp_applicable"]
     # --- END Contextual Triggers ---
 
     mc_results = quant_mc.run_fair_monte_carlo(
@@ -253,14 +274,14 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
         {"id": "Patch Payment Gateway", "cost": 12000000, "risk_reduction": 40000000},
         {"id": "Zero Trust Architecture", "cost": 35000000, "risk_reduction": 90000000},
     ]
-    opt_results = quant_opt.optimize_budget(dummy_patches, request.budget)
+    opt_results = quant_opt.optimize_budget(dummy_patches, payload.budget)
 
     sim_record = models.RiskSimulation(
         expected_annual_loss=mc_results["mean_expected_loss"],
         var_95=mc_results.get("var_95"),
         monte_carlo_distribution=mc_results.get("distribution_curve", []),
         optimized_budget_allocation=opt_results,
-        budget_used=request.budget,
+        budget_used=payload.budget,
     )
     db.add(sim_record)
     db.commit()
@@ -268,7 +289,7 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
     return {
         "status": "success",
         "message": "Risk simulation completed",
-        "budget_used": request.budget,
+        "budget_used": payload.budget,
         "monte_carlo": {
             "mean_expected_loss": mc_results["mean_expected_loss"],
             "var_95": mc_results["var_95"],
@@ -280,10 +301,11 @@ def simulate_risk(request: RiskSimRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+@limiter.limit("15/minute")
+async def chat(request: Request, payload: ChatRequest):
     from langchain_core.messages import HumanMessage
 
-    initial_state = {"messages": [HumanMessage(content=request.message)]}
+    initial_state = {"messages": [HumanMessage(content=payload.message)]}
 
     async def event_stream():
         has_yielded = False
