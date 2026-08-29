@@ -188,9 +188,9 @@ export default function ExecutiveDashboard() {
   <span className="material-symbols-outlined text-[14px] text-primary">policy</span> NIST CSF | RBI | SEBI
 </span>
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">FY 2024</span>
-<button className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95">
+<button onClick={() => window.print()} className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95">
 <span className="material-symbols-outlined text-[18px]">download</span> Export Report
-                     </button>
+</button>
 </div>
 </div>
 {/*  Bento Grid Layout  */}
