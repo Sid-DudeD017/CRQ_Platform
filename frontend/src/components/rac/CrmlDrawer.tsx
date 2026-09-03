@@ -59,18 +59,19 @@ controls_posture:
     - "Payment Gateway Vulnerability Patch (₹1.2Cr)"
 
 loss_exposure:
+  currency_unit: "INR_Crores"
   primary_loss_magnitude_annual:
-    min: 25000000 # ₹2.5 Cr
-    mode: 42800000 # ₹4.28 Cr (Mean ALE)
-    max: 95000000 # ₹9.5 Cr
+    min: 2.50
+    mode: 4.28
+    max: 9.50
   secondary_loss_statutory:
     is_dpdp_applicable: ${isDpdpActive}
-    dpdp_statutory_max_penalty: 4500000000 # ₹450 Cr
+    dpdp_statutory_max_penalty: 450.00
     sebi_cscrf_resilience_tier: "Tier-1 Intermediary"
 
 simulation_outputs:
-  annualized_loss_expectancy_inr: ${meanExpectedLoss}
-  value_at_risk_95_inr: ${var95}
+  annualized_loss_expectancy_cr: ${(meanExpectedLoss / 10000000).toFixed(2)}
+  value_at_risk_95_cr: ${(var95 / 10000000).toFixed(2)}
   iterations: 10000
 `;
 

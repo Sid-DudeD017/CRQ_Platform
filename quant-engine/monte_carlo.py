@@ -76,8 +76,14 @@ def run_fair_monte_carlo(
     x_vals = np.linspace(min(annual_losses), max(annual_losses), 100)
     y_vals = kde(x_vals)
     
+    # Normalize probabilities so the peak is exactly 1.0. 
+    # This prevents UI charting libraries (like Recharts) from collapsing 
+    # the Y-axis when dealing with extremely small float ranges (1e-10).
+    max_y = max(y_vals) if len(y_vals) > 0 and max(y_vals) > 0 else 1.0
+    y_vals_normalized = [y / max_y for y in y_vals]
+    
     # Format curve for frontend charting
-    curve = [{"loss": float(x), "probability": float(y)} for x, y in zip(x_vals, y_vals)]
+    curve = [{"loss": float(x), "probability": float(y)} for x, y in zip(x_vals, y_vals_normalized)]
     
     return {
         "mean_expected_loss": float(mean_loss),

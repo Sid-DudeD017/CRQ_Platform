@@ -12,6 +12,14 @@ const PATCHES = [
     { id: 'Enforce Cloud MFA', cost: 4500000, risk_reduction: 18000000, tag: 'Access' },
     { id: 'Patch Payment Gateway', cost: 12000000, risk_reduction: 40000000, tag: 'Payments' },
     { id: 'Zero Trust Architecture', cost: 35000000, risk_reduction: 90000000, tag: 'Architecture' },
+    { id: 'Deploy EDR Agents', cost: 15000000, risk_reduction: 50000000, tag: 'Endpoint' },
+    { id: 'Database Encryption (PII)', cost: 8000000, risk_reduction: 25000000, tag: 'Data' },
+    { id: 'Cloud Security Posture Management', cost: 22000000, risk_reduction: 60000000, tag: 'Cloud' },
+    { id: 'Network Segmentation (Core)', cost: 45000000, risk_reduction: 120000000, tag: 'Network' },
+    { id: 'Automated SIEM SOC', cost: 50000000, risk_reduction: 150000000, tag: 'Monitoring' },
+    { id: 'DDoS Mitigation Service', cost: 28000000, risk_reduction: 75000000, tag: 'Availability' },
+    { id: 'API WAF Gateway', cost: 18000000, risk_reduction: 45000000, tag: 'Application' },
+    { id: 'Endpoint DLP Deployment', cost: 25000000, risk_reduction: 65000000, tag: 'Endpoint' },
 ];
 
 // Efficiency frontier: cumulative cost vs. cumulative risk reduction,
@@ -37,7 +45,7 @@ const FRONTIER = (() => {
 // Cr) are actually reachable. The Overview page's slider caps at ₹1.5 Cr,
 // which makes "Zero Trust Architecture" (₹3.5 Cr) structurally unreachable
 // there - this page uses a range that can actually demonstrate the optimizer.
-const MAX_BUDGET = 60000000;
+const MAX_BUDGET = 1000000000;
 
 function formatCr(value: number) {
     return `₹${(value / 10000000).toFixed(2)} Cr`;

@@ -2,6 +2,21 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+
+const AVAILABLE_CONTROLS = [
+    { name: 'Enforce Cloud MFA', cost: '₹45 Lakhs', costNum: 4500000 },
+    { name: 'Patch Payment Gateway', cost: '₹1.20 Cr', costNum: 12000000 },
+    { name: 'Zero Trust Architecture', cost: '₹3.50 Cr', costNum: 35000000 },
+    { name: 'Deploy EDR Agents', cost: '₹1.50 Cr', costNum: 15000000 },
+    { name: 'Database Encryption (PII)', cost: '₹80 Lakhs', costNum: 8000000 },
+    { name: 'Cloud Security Posture Management', cost: '₹2.20 Cr', costNum: 22000000 },
+    { name: 'Network Segmentation (Core)', cost: '₹4.50 Cr', costNum: 45000000 },
+    { name: 'Automated SIEM SOC', cost: '₹5.00 Cr', costNum: 50000000 },
+    { name: 'DDoS Mitigation Service', cost: '₹2.80 Cr', costNum: 28000000 },
+    { name: 'API WAF Gateway', cost: '₹1.80 Cr', costNum: 18000000 },
+    { name: 'Endpoint DLP Deployment', cost: '₹2.50 Cr', costNum: 25000000 },
+];
+
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE } from '@/lib/api';
@@ -14,6 +29,7 @@ export default function ExecutiveDashboard() {
     const { token } = useAuth();
     const { showToast } = useToast();
     const [budget, setBudget] = useState(65);
+    const [selectedPatches, setSelectedPatches] = useState<string[]>([]);
     const [simResults, setSimResults] = useState<any>(null);
     const [isSimulating, setIsSimulating] = useState(false);
     const [controls, setControls] = useState<Record<string, boolean>>({
@@ -25,11 +41,6 @@ export default function ExecutiveDashboard() {
     const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
     const [isApproving, setIsApproving] = useState(false);
 
-    // AI Chat State
-    const [isChatOpen, setIsChatOpen] = useState(false);
-    const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
-    const [chatInput, setChatInput] = useState('');
-    const [isChatSending, setIsChatSending] = useState(false);
 
     // CRML Risk-as-Code Drawer
     const [isCrmlOpen, setIsCrmlOpen] = useState(false);
@@ -45,11 +56,14 @@ export default function ExecutiveDashboard() {
     const runSimulation = async () => {
         setIsSimulating(true);
         try {
-            const budgetValue = (budget / 100) * 15000000;
+            const netInvestment = selectedPatches.reduce((acc, p) => acc + (AVAILABLE_CONTROLS.find(c => c.name === p)?.costNum || 0), 0);
             const res = await fetch(`${API_BASE}/api/simulate-risk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ budget: budgetValue })
+                body: JSON.stringify({ 
+                    budget: netInvestment,
+                    selected_patches: selectedPatches
+                })
             });
             const data = await res.json();
             setSimResults(data);
@@ -143,42 +157,6 @@ export default function ExecutiveDashboard() {
         }
     };
 
-    const sendMessage = async () => {
-        if (!chatInput.trim()) return;
-
-        const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
-        setChatMessages(newMessages);
-        setChatInput('');
-        setIsChatSending(true);
-
-        try {
-            const res = await fetch(`${API_BASE}/api/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: chatInput, context: simResults })
-            });
-
-            const reader = res.body?.getReader();
-            const decoder = new TextDecoder();
-            let assistantResponse = '';
-
-            setChatMessages([...newMessages, { role: 'assistant', content: '' }]);
-
-            if (reader) {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    assistantResponse += decoder.decode(value);
-                    setChatMessages([...newMessages, { role: 'assistant', content: assistantResponse }]);
-                }
-            }
-        } catch (e) {
-            console.error(e);
-            setChatMessages([...newMessages, { role: 'assistant', content: "Error communicating with Virtual CISO." }]);
-        } finally {
-            setIsChatSending(false);
-        }
-    };
 
     const formatCr = (val: number) => `₹${(val / 10000000).toFixed(2)} Cr`;
 
@@ -339,59 +317,46 @@ export default function ExecutiveDashboard() {
                             </span>
                         </div>
 
-                        {/* Budget Slider */}
+                        {/* Net Investment */}
                         <div className="mb-4">
-                            <div className="flex justify-between mb-1.5">
-                                <label className="font-body-sm text-xs font-semibold">Security Budget Allocation</label>
-                                <span className="font-data-mono font-bold text-primary text-sm">
-                                    ₹{((budget / 100) * 1.5).toFixed(2)} Cr
+                            <div className="flex justify-between items-center p-3 border border-outline-variant rounded-lg bg-surface">
+                                <div>
+                                    <label className="font-body-sm text-xs font-semibold text-primary block">Calculated Net Investment</label>
+                                    <span className="text-[10px] text-on-surface-variant">Cost of selected patches</span>
+                                </div>
+                                <span className="font-data-mono font-bold text-[#10b981] text-lg">
+                                    ₹{((selectedPatches.reduce((acc, p) => acc + (AVAILABLE_CONTROLS.find(c => c.name === p)?.costNum || 0), 0)) / 10000000).toFixed(2)} Cr
                                 </span>
                             </div>
-                            <input
-                                className="w-full h-1 bg-surface-variant rounded-lg cursor-pointer accent-primary"
-                                max="100"
-                                min="0"
-                                type="range"
-                                value={budget}
-                                onChange={handleBudgetChange}
-                            />
                         </div>
 
                         {/* Strategic Controls */}
-                        <div className="space-y-2 mb-4">
-                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-body-sm text-xs font-medium">Enforce Cloud MFA</span>
-                                    {optimizerPicks?.includes('Enforce Cloud MFA') && (
-                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
-                                            Recommended
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹45 Lakhs</span>
-                            </div>
-                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-body-sm text-xs font-medium">Patch Payment Gateway</span>
-                                    {optimizerPicks?.includes('Patch Payment Gateway') && (
-                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
-                                            Recommended
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹1.20 Cr</span>
-                            </div>
-                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-body-sm text-xs font-medium">Zero Trust Architecture</span>
-                                    {optimizerPicks?.includes('Zero Trust Architecture') && (
-                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
-                                            Recommended
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹3.50 Cr</span>
-                            </div>
+                        <div className="space-y-2 mb-4 h-64 overflow-y-auto custom-scrollbar pr-2">
+                            {AVAILABLE_CONTROLS.map(ctrl => (
+                                <label key={ctrl.name} className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface cursor-pointer hover:bg-surface-variant transition-colors">
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 accent-primary rounded border-outline"
+                                            checked={selectedPatches.includes(ctrl.name)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedPatches(prev => [...prev, ctrl.name]);
+                                                } else {
+                                                    setSelectedPatches(prev => prev.filter(p => p !== ctrl.name));
+                                                }
+                                            }}
+                                        />
+                                        <span className="font-body-sm text-xs font-medium">{ctrl.name}</span>
+                                        {optimizerPicks?.includes(ctrl.name) && (
+                                            <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
+                                                Active
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className="font-data-mono text-xs text-on-surface-variant font-bold">{ctrl.cost}</span>
+                                </label>
+                            ))}
                         </div>
                     </div>
 
@@ -513,84 +478,7 @@ export default function ExecutiveDashboard() {
                 isDpdpActive={true}
             />
 
-            {/* AI Assistant Chat Panel */}
-            {isChatOpen && (
-                <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50 animate-fade-scale-in">
-                    <div className="bg-primary text-on-primary p-3.5 flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                            <span className="material-symbols-outlined text-[18px]">smart_toy</span>
-                            <h3 className="font-title-md font-bold text-sm">Virtual CISO Agent</h3>
-                        </div>
-                        <button onClick={() => setIsChatOpen(false)} className="hover:opacity-80">
-                            <span className="material-symbols-outlined text-[18px]">close</span>
-                        </button>
-                    </div>
 
-                    <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2 custom-scrollbar">
-                        {chatMessages.length === 0 && (
-                            <div className="text-on-surface-variant text-xs text-center mt-6">
-                                Ask the Virtual CISO about RBI/SEBI/DPDP compliance regulations, telemetry status, or budget optimization...
-                            </div>
-                        )}
-                        {chatMessages.map((msg, idx) => {
-                            const sourceMatch = msg.content.match(/\n*Sources?:\s*([A-Za-z0-9,\/ ]+)\s*$/i);
-                            const mainText = sourceMatch ? msg.content.slice(0, sourceMatch.index) : msg.content;
-                            const sourceTags = sourceMatch
-                                ? sourceMatch[1].split(',').map((s) => s.trim()).filter(Boolean)
-                                : [];
-
-                            return (
-                                <div
-                                    key={idx}
-                                    className={`p-3 rounded-lg max-w-[85%] text-xs ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}
-                                >
-                                    <p className="whitespace-pre-wrap">{mainText}</p>
-                                    {sourceTags.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 mt-2 pt-1.5 border-t border-outline-variant/40">
-                                            {sourceTags.map((tag, i) => (
-                                                <span key={i} className="px-1.5 py-0.2 bg-primary-container text-on-primary-container rounded text-[10px] font-label-caps">
-                                                    {tag}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    <div className="p-2.5 border-t border-outline-variant bg-surface-container-low flex gap-1.5">
-                        <input
-                            type="text"
-                            value={chatInput}
-                            onChange={(e) => setChatInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                            placeholder="Ask Virtual CISO..."
-                            className="flex-1 bg-surface border border-outline-variant rounded px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:border-primary"
-                        />
-                        <button
-                            onClick={sendMessage}
-                            disabled={isChatSending}
-                            className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90 disabled:opacity-50"
-                        >
-                            <span className="material-symbols-outlined text-[16px]">
-                                {isChatSending ? 'hourglass_top' : 'send'}
-                            </span>
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Floating Chat Trigger Button */}
-            <button
-                onClick={() => setIsChatOpen(!isChatOpen)}
-                className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-xl z-50 hover:scale-105 active:scale-95 transition-all"
-                aria-label="Virtual CISO Assistant"
-            >
-                <span className="material-symbols-outlined text-[24px]">
-                    {isChatOpen ? 'close' : 'auto_awesome'}
-                </span>
-            </button>
         </div>
     );
 }

@@ -18,9 +18,9 @@ Merged from two branches off the same base (12462e7):
 """
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import UploadFile, File, BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -88,6 +88,7 @@ class ChatRequest(BaseModel):
 class RiskSimRequest(BaseModel):
     budget: float
     constraints: Optional[Dict[str, Any]] = None
+    selected_patches: Optional[List[str]] = None
 
 
 class AuditRequest(BaseModel):
@@ -133,8 +134,79 @@ def get_telemetry(db: Session = Depends(get_db)):
                 "threat_level": "HIGH",
                 "edr_status": "ACTIVE",
             }],
-        }
+            }
     return {"status": "success", "data": logs}
+
+
+@app.post("/api/upload-telemetry")
+async def upload_telemetry(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    import json
+    
+    content = await file.read()
+    content_str = content.decode('utf-8')
+    filename = file.filename.lower()
+    
+    logs_created = 0
+    
+    # Ensure there's a default asset if one doesn't exist
+    default_asset_id = "AST-001"
+    asset = db.exec(select(models.Asset).where(models.Asset.id == default_asset_id)).first()
+    if not asset:
+        asset = models.Asset(id=default_asset_id, name="Default Ingestion Asset", business_unit="Ingestion", business_value=100000.0)
+        db.add(asset)
+        db.commit()
+    
+    if filename.endswith(".json"):
+        try:
+            data = json.loads(content_str)
+            if not isinstance(data, list):
+                data = [data]
+                
+            for item in data:
+                log = models.TelemetryLog(
+                    asset_id=item.get("asset_id", default_asset_id),
+                    cve_ids=item.get("cve_ids"),
+                    cvss_score=item.get("cvss_score"),
+                    patch_status=item.get("patch_status"),
+                    event_frequency_24h=item.get("event_frequency_24h", 0),
+                    anomalous_access_flags=item.get("anomalous_access_flags", 0),
+                    incident_alert_level=item.get("incident_alert_level"),
+                    privilege_level=item.get("privilege_level"),
+                    excessive_permissions=item.get("excessive_permissions", False),
+                    mfa_active=item.get("mfa_active", True),
+                    edr_health_status=item.get("edr_health_status"),
+                    host_compromise_flags=item.get("host_compromise_flags", False),
+                    malware_alerts_24h=item.get("malware_alerts_24h", 0),
+                    public_exposure_flag=item.get("public_exposure_flag", False),
+                    cloud_misconfigurations_count=item.get("cloud_misconfigurations_count", 0),
+                    cisa_kev_presence=item.get("cisa_kev_presence", False),
+                    threat_actor_chatter=item.get("threat_actor_chatter")
+                )
+                db.add(log)
+                logs_created += 1
+            db.commit()
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid JSON file")
+            
+    elif filename.endswith(".txt"):
+        # Basic regex/string matching parser for demo network config files
+        log = models.TelemetryLog(asset_id=default_asset_id)
+        
+        # Missing anti-spoofing
+        if "ip verify unicast source reachable-via rx" not in content_str:
+            log.cloud_misconfigurations_count += 1
+            
+        # Missing BGP neighbor auth
+        if "router bgp" in content_str and "password" not in content_str:
+            log.cloud_misconfigurations_count += 1
+            
+        db.add(log)
+        db.commit()
+        logs_created += 1
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload .json or .txt")
+        
+    return {"status": "success", "message": f"Successfully ingested {logs_created} telemetry logs."}
 
 
 @app.get("/api/topology")
@@ -165,7 +237,7 @@ def get_topology(db: Session = Depends(get_db)):
             "adjacency_matrix": matrix,
             "node_mapping": {i: asset_id for i, asset_id in enumerate(asset_ids)},
             "timestamp": datetime.utcnow().isoformat(),
-        },
+            },
     }
 
 
@@ -184,7 +256,47 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
         raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
 
     mc_results = quant_mc.run_fair_monte_carlo(**inputs)
-    opt_results = quant_opt.optimize_budget(risk_engine.DUMMY_PATCHES, payload.budget)
+    if payload.selected_patches is not None:
+        # User manually selected patches. Bypass Knapsack.
+        total_cost = 0.0
+        total_risk_reduced = 0.0
+        selected = []
+        for p in risk_engine.DUMMY_PATCHES:
+            if p['id'] in payload.selected_patches:
+                selected.append(p['id'])
+                total_cost += p['cost']
+                total_risk_reduced += p['risk_reduction']
+        opt_results = {
+            "status": "Manual Selection",
+            "selected_patches": selected,
+            "total_cost": total_cost,
+            "total_risk_reduced": total_risk_reduced
+        }
+    else:
+        opt_results = quant_opt.optimize_budget(risk_engine.DUMMY_PATCHES, payload.budget)
+
+    total_risk_reduced = opt_results.get("total_risk_reduced", 0.0)
+    if total_risk_reduced > 0:
+        mc_results["mean_expected_loss"] = max(0.0, mc_results["mean_expected_loss"] - total_risk_reduced)
+        if "var_95" in mc_results:
+            mc_results["var_95"] = max(0.0, mc_results["var_95"] - total_risk_reduced)
+        if "var_99" in mc_results:
+            mc_results["var_99"] = max(0.0, mc_results["var_99"] - total_risk_reduced)
+        if "distribution_curve" in mc_results:
+            for point in mc_results["distribution_curve"]:
+                point["loss"] = max(0.0, point["loss"] - total_risk_reduced)
+        
+        # Artificially boost SEBI capability index based on patches
+        if "sebi_resilience" in mc_results:
+            # E.g. every 1 Crore of risk reduction boosts withstand by 0.05
+            boost = (total_risk_reduced / 10000000.0) * 0.05
+            sebi = mc_results["sebi_resilience"]
+            sebi["withstand"] = min(5.0, sebi["withstand"] + boost)
+            sebi["anticipate"] = min(5.0, sebi["anticipate"] + boost * 0.5)
+            sebi["contain"] = min(5.0, sebi["contain"] + boost * 0.8)
+            sebi["recover"] = min(5.0, sebi["recover"] + boost * 0.5)
+            sebi["cci_score"] = (sebi["anticipate"] + sebi["withstand"] + sebi["contain"] + sebi["recover"]) / 4.0
+            sebi["evolve"] = min(5.0, sebi["cci_score"] * 1.1)
 
     sim_record = models.RiskSimulation(
         expected_annual_loss=mc_results["mean_expected_loss"],
@@ -204,7 +316,7 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
             "mean_expected_loss": mc_results["mean_expected_loss"],
             "var_95": mc_results["var_95"],
             "distribution_curve": mc_results.get("distribution_curve", []),
-        },
+            },
         "sebi_resilience": mc_results.get("sebi_resilience", {}),
         "optimization": opt_results,
     }

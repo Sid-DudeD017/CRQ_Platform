@@ -27,6 +27,14 @@ DUMMY_PATCHES = [
     {"id": "Enforce Cloud MFA", "cost": 4500000, "risk_reduction": 18000000},
     {"id": "Patch Payment Gateway", "cost": 12000000, "risk_reduction": 40000000},
     {"id": "Zero Trust Architecture", "cost": 35000000, "risk_reduction": 90000000},
+    {"id": "Deploy EDR Agents", "cost": 15000000, "risk_reduction": 50000000},
+    {"id": "Database Encryption (PII)", "cost": 8000000, "risk_reduction": 25000000},
+    {"id": "Cloud Security Posture Management", "cost": 22000000, "risk_reduction": 60000000},
+    {"id": "Network Segmentation (Core)", "cost": 45000000, "risk_reduction": 120000000},
+    {"id": "Automated SIEM SOC", "cost": 50000000, "risk_reduction": 150000000},
+    {"id": "DDoS Mitigation Service", "cost": 28000000, "risk_reduction": 75000000},
+    {"id": "API WAF Gateway", "cost": 18000000, "risk_reduction": 45000000},
+    {"id": "Endpoint DLP Deployment", "cost": 25000000, "risk_reduction": 65000000},
 ]
 
 
@@ -49,14 +57,14 @@ def derive_fair_inputs(db: Session, dpdp_override: Optional[bool] = None) -> Opt
     ).all() or []
 
     high_threat_count = sum(1 for log in latest_logs if log.threat_level in ("HIGH", "CRITICAL"))
-    base_tef = 10.0 + (high_threat_count * 5.0)
+    base_tef = 0.05 + (high_threat_count * 0.02)
     for log in latest_logs:
-        base_tef += (log.event_frequency_24h * 0.001)
-        base_tef += (log.anomalous_access_flags * 2.0)
+        base_tef += (log.event_frequency_24h * 0.0001)
+        base_tef += (log.anomalous_access_flags * 0.01)
         if log.cisa_kev_presence:
-            base_tef += 50.0
+            base_tef += 0.2
         if log.incident_alert_level == "CRITICAL":
-            base_tef += 20.0
+            base_tef += 0.1
 
     # --- BEGIN Blast Radius & Conditional Vulnerability ---
     asset_ids = [a.id for a in assets]
@@ -120,7 +128,7 @@ def derive_fair_inputs(db: Session, dpdp_override: Optional[bool] = None) -> Opt
     # --- END Contextual Triggers ---
 
     return {
-        "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
+        "tef_min": max(0.01, base_tef * 0.5), "tef_mode": base_tef, "tef_max": base_tef * 1.5,
         "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
         "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
         "plm_min": base_plm * 0.5, "plm_mode": base_plm, "plm_max": base_plm * 2.0,
