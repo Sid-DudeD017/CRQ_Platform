@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE } from '@/lib/api';
+import MonteCarloCurve from '@/components/charts/MonteCarloCurve';
+import SebiCapabilityRadar from '@/components/charts/SebiCapabilityRadar';
+import TornadoChart from '@/components/charts/TornadoChart';
+import CrmlDrawer from '@/components/rac/CrmlDrawer';
 
 export default function ExecutiveDashboard() {
     const { token } = useAuth();
@@ -18,16 +22,21 @@ export default function ExecutiveDashboard() {
         'Zero Trust Architecture': false,
     });
     const [optimizerPicks, setOptimizerPicks] = useState<string[] | null>(null);
+    const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
+    const [isApproving, setIsApproving] = useState(false);
+
+    // AI Chat State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
+    const [chatInput, setChatInput] = useState('');
+    const [isChatSending, setIsChatSending] = useState(false);
+
+    // CRML Risk-as-Code Drawer
+    const [isCrmlOpen, setIsCrmlOpen] = useState(false);
 
     const toggleControl = (name: string) => {
         setControls((prev) => ({ ...prev, [name]: !prev[name] }));
     };
-    const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
-    const [isApproving, setIsApproving] = useState(false);
-    const [isChatOpen, setIsChatOpen] = useState(false);
-    const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
-    const [chatInput, setChatInput] = useState('');
-    const [isChatSending, setIsChatSending] = useState(false);
 
     const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setBudget(Number(e.target.value));
@@ -36,8 +45,7 @@ export default function ExecutiveDashboard() {
     const runSimulation = async () => {
         setIsSimulating(true);
         try {
-            // budget here is 0-100, let's map it to a budget. Max budget could be 15 Cr = 15,000,000
-            const budgetValue = (budget / 100) * 15000000; 
+            const budgetValue = (budget / 100) * 15000000;
             const res = await fetch(`${API_BASE}/api/simulate-risk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -54,15 +62,19 @@ export default function ExecutiveDashboard() {
                 });
                 return next;
             });
-            showToast(`Simulation complete - ${picks.length} of 3 controls recommended within this budget.`, 'success');
-            console.log("Sim Results:", data);
+            showToast(`Simulation complete: ${picks.length} controls recommended within budget.`, 'success');
         } catch (e) {
             console.error(e);
-            showToast("Error running simulation. Ensure FastAPI is running on port 8000.", 'error');
+            showToast("Error running simulation. Ensure backend is running on port 8000.", 'error');
         } finally {
             setIsSimulating(false);
         }
     };
+
+    useEffect(() => {
+        runSimulation();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const acceptRisk = async (label: string, riskAmountRupees: number) => {
         if (!token) {
@@ -80,6 +92,7 @@ export default function ExecutiveDashboard() {
                 body: JSON.stringify({
                     action: `Accept residual risk: ${label}`,
                     risk_accepted: riskAmountRupees,
+                    board_approved: false,
                 }),
             });
             const data = await res.json();
@@ -87,7 +100,7 @@ export default function ExecutiveDashboard() {
                 showToast(`Could not log audit: ${data.detail || res.status}`, 'error');
                 return;
             }
-            showToast(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id} - Decided by: ${data.decided_by}`, 'success');
+            showToast(`Risk accepted & logged on-chain. Decision #${data.decision_id} by ${data.decided_by}`, 'success');
         } catch (e) {
             console.error(e);
             showToast('Error contacting backend. Is it running on port 8000?', 'error');
@@ -96,10 +109,6 @@ export default function ExecutiveDashboard() {
         }
     };
 
-    // Logs the AI-optimized patch plan as a single board-approved audit
-    // decision (in addition to accepting/rejecting individual risks above) -
-    // ports Siddharth's "Approve & Log" idea onto the real auth/toast
-    // plumbing instead of a hardcoded re-login on every click.
     const approveOptimizer = async () => {
         if (!simResults?.optimization) return;
         if (!token) {
@@ -125,10 +134,10 @@ export default function ExecutiveDashboard() {
                 showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
                 return;
             }
-            showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
+            showToast(`Optimization plan approved and committed to ledger. Decision #${data.decision_id}.`, 'success');
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend.', 'error');
         } finally {
             setIsApproving(false);
         }
@@ -136,26 +145,25 @@ export default function ExecutiveDashboard() {
 
     const sendMessage = async () => {
         if (!chatInput.trim()) return;
-        
+
         const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
         setChatMessages(newMessages);
         setChatInput('');
         setIsChatSending(true);
-        
+
         try {
             const res = await fetch(`${API_BASE}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: chatInput, context: simResults })
             });
-            
+
             const reader = res.body?.getReader();
             const decoder = new TextDecoder();
             let assistantResponse = '';
-            
-            // Add a placeholder for assistant response
+
             setChatMessages([...newMessages, { role: 'assistant', content: '' }]);
-            
+
             if (reader) {
                 while (true) {
                     const { done, value } = await reader.read();
@@ -172,327 +180,417 @@ export default function ExecutiveDashboard() {
         }
     };
 
-    return (
-        <>
-            <main className="flex-1 p-container-padding bg-background overflow-y-auto">
-<div className="mb-stack-lg flex justify-between items-end">
-<div>
-<h1 className="font-headline-md text-headline-md text-primary mb-1">Portfolio Risk Overview</h1>
-<p className="font-body-md text-body-md text-on-surface-variant">Real-time quantification of cyber exposure vs. security investment.</p>
-</div>
-<div className="flex items-center gap-stack-sm">
-<span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1">
-  <span className="material-symbols-outlined text-[14px] text-[#15803d]">check_circle</span> SIEM & CSPM Sync
-</span>
-<span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1">
-  <span className="material-symbols-outlined text-[14px] text-primary">policy</span> NIST CSF | RBI | SEBI
-</span>
-<span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">FY 2024</span>
-<button onClick={() => window.print()} className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95">
-<span className="material-symbols-outlined text-[18px]">download</span> Export Report
-</button>
-</div>
-</div>
-{/*  Bento Grid Layout  */}
-<div className="grid grid-cols-12 gap-gutter mb-stack-lg">
-{/*  Centerpiece: ALE  */}
-<div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col justify-between elevate">
-<div>
-<div className="flex justify-between items-start mb-stack-sm">
-<h3 className="font-title-lg text-title-lg text-primary">Annualized Loss Expectancy</h3>
-<button className="text-on-surface-variant hover:text-primary"><span className="material-symbols-outlined text-[20px]">info</span></button>
-</div>
-<p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Projected financial impact based on current control posture.</p>
-</div>
-<div>
-<div key={simResults ? 'loaded-ale' : 'default-ale'} className="flex items-baseline gap-2 animate-fade-scale-in">
-<span className="font-display-lg text-display-lg text-primary tracking-tighter">
-  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.mean_expected_loss / 10000000).toFixed(2) : "4.28"}
-</span>
-<span className="font-headline-sm text-headline-sm text-on-surface-variant">Cr</span>
-</div>
-<div className="flex items-center gap-1 mt-2 text-error">
-<span className="material-symbols-outlined text-[16px]">trending_up</span>
-<span className="font-data-mono text-data-mono">+4.2% YoY</span>
-</div>
-</div>
-</div>
-{/*  Scorecards  */}
-<div className="col-span-12 lg:col-span-3 flex flex-col gap-gutter">
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center elevate">
-<h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">95% Value at Risk (VaR)</h4>
-<div className="font-headline-md text-headline-md text-primary font-data-mono">
-  ₹{simResults && simResults.monte_carlo ? (simResults.monte_carlo.var_95 / 10000000).toFixed(2) : "12.5"} Cr
-</div>
-<div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Tail risk exposure</div>
-</div>
-<div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md flex-1 flex flex-col justify-center elevate">
-<h4 className="font-label-caps text-label-caps text-on-surface-variant mb-1">Overall ROI of Spend</h4>
-<div className="font-headline-md text-headline-md text-[#15803d] font-data-mono flex items-center"><span className="material-symbols-outlined mr-1">arrow_upward</span>18%</div>
-<div className="text-on-surface-variant font-body-sm text-body-sm mt-1">Security efficiency</div>
-</div>
-</div>
-{/*  Loss Distribution Chart  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col elevate">
-<h3 className="font-title-lg text-title-lg text-primary mb-1">Loss Distribution</h3>
-<p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Monte Carlo simulation (10,000 iterations)</p>
-<div className="flex-1 w-full bg-surface-container-low rounded relative border border-outline-variant border-dashed overflow-hidden flex items-end justify-center pb-4">
-{simResults && simResults.monte_carlo && simResults.monte_carlo.distribution_curve ? (
-    <ResponsiveContainer width="100%" height={150}>
-        <AreaChart data={simResults.monte_carlo.distribution_curve} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-            <defs>
-                <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.45}/>
-                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
-                </linearGradient>
-            </defs>
-            <XAxis dataKey="loss" hide={true} />
-            <YAxis hide={true} />
-            <Tooltip 
-                formatter={(value: any, name: any, props: any) => [`${(props.payload.loss / 10000000).toFixed(2)} Cr`, 'Loss']}
-                labelFormatter={() => ''}
-            />
-            <Area type="monotone" dataKey="probability" stroke="var(--primary)" strokeWidth={2} fillOpacity={1} fill="url(#colorLoss)" />
-        </AreaChart>
-    </ResponsiveContainer>
-) : (
-    <div className="w-full h-32 flex items-center justify-center text-on-surface-variant font-body-sm">
-        Run simulation to view loss distribution
-    </div>
-)}
-</div>
-</div>
-</div>
-{/*  Bottom Row: Sandbox & Breakdown  */}
-<div className="grid grid-cols-12 gap-gutter">
-{/*  What-If Sandbox  */}
-<div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
-<div className="flex justify-between items-center mb-stack-lg">
-<h3 className="font-title-lg text-title-lg text-primary">Simulation Sandbox</h3>
-<span className="bg-secondary-container text-on-secondary-container px-2 py-1 rounded font-label-caps text-label-caps">Draft Mode</span>
-</div>
-<div className="space-y-stack-lg">
-{/*  Budget Slider  */}
-<div>
-<div className="flex justify-between mb-2">
-<label className="font-body-sm text-body-sm font-semibold">Security Budget Allocation</label>
-<span className="font-data-mono text-data-mono font-bold">₹{((budget/100)*15).toFixed(1)} Cr</span>
-</div>
-<input className="w-full h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range"  value={budget} onChange={handleBudgetChange} />
-<div className="flex justify-between mt-1 text-on-surface-variant font-label-caps text-label-caps">
-<span className="">₹0</span>
-<span className="">₹15 Cr+</span>
-</div>
-</div>
-<hr className="border-outline-variant border-dashed" />
-{/*  Strategic Controls  */}
-<div>
-<div className="flex justify-between items-center mb-stack-md">
-  <h4 className="font-body-sm text-body-sm font-semibold">Strategic Controls</h4>
-  {simResults?.optimization?.total_cost ? (
-    <div className="flex items-center gap-2">
-      <span className="font-label-caps text-label-caps text-on-surface-variant">
-        Optimized Cost: ₹{Number(simResults.optimization.total_cost).toLocaleString()}
-      </span>
-      <button
-        onClick={approveOptimizer}
-        disabled={isApproving}
-        className="px-3 py-1 bg-[#15803d] text-white rounded font-label-caps text-label-caps font-semibold hover:bg-opacity-90 disabled:opacity-50 transition-colors active:scale-95"
-      >
-        {isApproving ? 'Logging...' : 'Approve & Log'}
-      </button>
-    </div>
-  ) : null}
-</div>
-<div className="grid grid-cols-1 md:grid-cols-2 gap-stack-md">
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<div className="flex items-center gap-2">
-<span className="font-body-sm text-body-sm font-medium">Enforce Cloud MFA</span>
-{optimizerPicks && optimizerPicks.includes('Enforce Cloud MFA') && (
-    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
-        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
-    </span>
-)}
-</div>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹45L</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input checked={controls['Enforce Cloud MFA']} onChange={() => toggleControl('Enforce Cloud MFA')} className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
-</label>
-</div>
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<div className="flex items-center gap-2">
-<span className="font-body-sm text-body-sm font-medium">Patch Payment Gateway</span>
-{optimizerPicks && optimizerPicks.includes('Patch Payment Gateway') && (
-    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
-        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
-    </span>
-)}
-</div>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹1.2 Cr</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input checked={controls['Patch Payment Gateway']} onChange={() => toggleControl('Patch Payment Gateway')} className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
-</label>
-</div>
-<div className="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface hover:bg-surface-container-low transition-colors">
-<div className="flex flex-col">
-<div className="flex items-center gap-2">
-<span className="font-body-sm text-body-sm font-medium">Zero Trust Architecture</span>
-{optimizerPicks && optimizerPicks.includes('Zero Trust Architecture') && (
-    <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
-        <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
-    </span>
-)}
-</div>
-<span className="font-label-caps text-label-caps text-on-surface-variant mt-1">Est. Cost: ₹3.5 Cr</span>
-</div>
-<label className="relative inline-flex items-center cursor-pointer">
-<input checked={controls['Zero Trust Architecture']} onChange={() => toggleControl('Zero Trust Architecture')} className="sr-only peer" type="checkbox" value="" />
-<div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary"></div>
-</label>
-</div>
-</div>
-</div>
-<button onClick={runSimulation} disabled={isSimulating} className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-3 rounded font-semibold hover:bg-opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                            {isSimulating && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
-                            {isSimulating ? 'Running Simulation...' : 'Run Simulation'}
-                        </button>
-</div>
-</div>
-{/*  Strategic Breakdown  */}
-<div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
-<h3 className="font-title-lg text-title-lg text-primary mb-stack-lg">Risk by Business Unit</h3>
-<div className="space-y-4">
-{/*  Unit 1  */}
-<div>
-<div className="flex justify-between items-end mb-1">
-<span className="font-body-sm text-body-sm font-medium">Payment Processing</span>
-<span className="font-data-mono text-data-mono font-bold">₹2.0 Cr/yr</span><button onClick={() => acceptRisk('Payment Processing', 20000000)} disabled={acceptingRiskFor === 'Payment Processing'} className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors active:scale-95 disabled:opacity-60">{acceptingRiskFor === 'Payment Processing' ? 'Logging...' : 'Accept Risk'}</button>
-</div>
-<div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-<div className="bg-error h-2 rounded" style={{width: "45%"}}></div>
-</div>
-</div>
-{/*  Unit 2  */}
-<div>
-<div className="flex justify-between items-end mb-1">
-<span className="font-body-sm text-body-sm font-medium">Retail Operations</span>
-<span className="font-data-mono text-data-mono font-bold">₹1.2 Cr/yr</span>
-</div>
-<div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-<div className="bg-[#ca8a04] h-2 rounded" style={{width: "28%"}}></div>
-</div>
-</div>
-{/*  Unit 3  */}
-<div>
-<div className="flex justify-between items-end mb-1">
-<span className="font-body-sm text-body-sm font-medium">Corporate IT</span>
-<span className="font-data-mono text-data-mono font-bold">₹0.68 Cr/yr</span>
-</div>
-<div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-<div className="bg-[#eab308] h-2 rounded" style={{width: "15%"}}></div>
-</div>
-</div>
-{/*  Unit 4  */}
-<div>
-<div className="flex justify-between items-end mb-1">
-<span className="font-body-sm text-body-sm font-medium">Supply Chain</span>
-<span className="font-data-mono text-data-mono font-bold">₹0.40 Cr/yr</span>
-</div>
-<div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-<div className="bg-primary-container h-2 rounded" style={{width: "12%"}}></div>
-</div>
-</div>
-</div>
-<a href="/ledger" className="mt-stack-lg text-primary font-body-sm text-body-sm font-semibold flex items-center gap-1 hover:underline w-fit">
-                        View Detailed Ledger <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-</a>
-</div>
-</div>
-</main>
-{/* AI Chat Panel */}
-{isChatOpen && (
-    <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50 animate-fade-scale-in">
-        <div className="bg-primary text-on-primary p-4 flex justify-between items-center">
-            <h3 className="font-title-md font-bold">Virtual CISO</h3>
-            <button onClick={() => setIsChatOpen(false)} className="hover:opacity-80">
-                <span className="material-symbols-outlined">close</span>
-            </button>
-        </div>
-        <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2 custom-scrollbar">
-            {chatMessages.length === 0 && (
-                <div className="text-on-surface-variant text-body-sm text-center mt-4">
-                    Ask me about the risk simulation or compliance frameworks...
-                </div>
-            )}
-            {chatMessages.map((msg, idx) => {
-                // Compliance answers end with a "Sources: RBI, SEBI" line (see
-                // ai-agent/rag.py) - split it out and render as chips instead of
-                // plain trailing text, so the citation actually stands out as a
-                // trust signal rather than blending into the paragraph.
-                const sourceMatch = msg.content.match(/\n*Sources?:\s*([A-Za-z0-9,\/ ]+)\s*$/i);
-                const mainText = sourceMatch ? msg.content.slice(0, sourceMatch.index) : msg.content;
-                const sourceTags = sourceMatch
-                    ? sourceMatch[1].split(',').map((s) => s.trim()).filter(Boolean)
-                    : [];
+    const formatCr = (val: number) => `₹${(val / 10000000).toFixed(2)} Cr`;
 
-                return (
-                    <div key={idx} className={`p-3 rounded-lg max-w-[85%] animate-fade-scale-in ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}>
-                        {msg.role === 'assistant' && !msg.content && isChatSending ? (
-                            <div className="flex gap-1 py-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style={{ animationDelay: '300ms' }}></span>
+    return (
+        <div className="flex flex-col gap-6 max-w-[1440px] mx-auto pb-12">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-3">
+                <div>
+                    <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary text-[28px]">shield</span>
+                        <h1 className="font-headline-md text-headline-md text-primary font-bold">Portfolio Risk Overview</h1>
+                    </div>
+                    <p className="font-body-md text-body-md text-on-surface-variant mt-1">
+                        Continuous mathematical quantification of enterprise cyber risk vs. security capital allocation.
+                    </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={() => setIsCrmlOpen(true)}
+                        className="px-3 py-1.5 bg-[#0f172a] text-[#38bdf8] border border-slate-700 hover:border-slate-500 rounded-lg font-data-mono text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="View Declarative Risk Model Specification"
+                    >
+                        <span className="material-symbols-outlined text-[15px]">code</span> View Model Spec
+                    </button>
+                    <span className="font-label-caps text-xs text-on-surface-variant px-2.5 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-[#10b981]">check_circle</span> Telemetry Active
+                    </span>
+                    <span className="font-label-caps text-xs text-on-surface-variant px-2.5 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-primary">gavel</span> SEBI | RBI | DPDP | NIST
+                    </span>
+                    <Link
+                        href="/reports"
+                        className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container px-3.5 py-1.5 rounded-lg font-body-sm text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                        <span className="material-symbols-outlined text-[16px]">assessment</span> Board Report
+                    </Link>
+                </div>
+            </div>
+
+            {/* Top Row: Executive Bento Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+                {/* 1. Expected Annual Loss (ALE) */}
+                <div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex flex-col justify-between elevate shadow-sm">
+                    <div>
+                        <div className="flex justify-between items-start mb-1">
+                            <h3 className="font-title-lg font-bold text-primary">Annualized Loss Expectancy</h3>
+                            <span className="text-[10px] uppercase font-label-caps px-2 py-0.5 rounded bg-primary-container text-on-primary-container">
+                                FAIR ALE
+                            </span>
+                        </div>
+                        <p className="font-body-sm text-xs text-on-surface-variant mb-4">
+                            Projected mean financial loss based on current posture and telemetry.
+                        </p>
+                    </div>
+                    <div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="font-display-lg text-4xl font-extrabold text-primary tracking-tight font-data-mono">
+                                {simResults && simResults.monte_carlo
+                                    ? formatCr(simResults.monte_carlo.mean_expected_loss)
+                                    : "₹4.28 Cr"}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1 mt-2 text-[#ef4444] text-xs">
+                            <span className="material-symbols-outlined text-[14px]">trending_up</span>
+                            <span className="font-data-mono font-semibold">+4.2% YoY without patch remediations</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 2. 95% Tail VaR & ROSI Spend Efficiency */}
+                <div className="col-span-12 lg:col-span-4 flex flex-col gap-4">
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 flex-1 flex flex-col justify-center elevate shadow-sm">
+                        <div className="flex justify-between items-center mb-1">
+                            <h4 className="font-label-caps text-xs text-on-surface-variant uppercase">95% Value at Risk (VaR)</h4>
+                            <span className="text-[10px] text-[#f59e0b] font-bold font-data-mono">1-in-20 yr event</span>
+                        </div>
+                        <div className="font-headline-md text-2xl font-bold text-[#f59e0b] font-data-mono">
+                            {simResults && simResults.monte_carlo
+                                ? formatCr(simResults.monte_carlo.var_95)
+                                : "₹12.50 Cr"}
+                        </div>
+                        <div className="text-on-surface-variant text-[11px] mt-0.5">Maximum financial loss at 95% confidence</div>
+                    </div>
+
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 flex-1 flex flex-col justify-center elevate shadow-sm">
+                        <div className="flex justify-between items-center mb-1">
+                            <h4 className="font-label-caps text-xs text-on-surface-variant uppercase">ROSI Spend Efficiency</h4>
+                            <span className="text-[10px] text-[#10b981] font-bold font-data-mono">Return on Sec. Inv.</span>
+                        </div>
+                        <div className="font-headline-md text-2xl font-bold text-[#10b981] font-data-mono flex items-center">
+                            <span className="material-symbols-outlined mr-1 text-[20px]">arrow_upward</span>
+                            {simResults?.optimization?.total_risk_reduced && simResults?.optimization?.total_cost
+                                ? `${Math.round(((simResults.optimization.total_risk_reduced - simResults.optimization.total_cost) / simResults.optimization.total_cost) * 100)}%`
+                                : "240%"}
+                        </div>
+                        <div className="text-on-surface-variant text-[11px] mt-0.5">Optimal Knapsack capital multiplier</div>
+                    </div>
+                </div>
+
+                {/* 3. SEBI Resilience Radar */}
+                <div className="col-span-12 lg:col-span-4 bg-surface-container-lowest border border-outline-variant rounded-xl p-4 flex flex-col justify-between elevate shadow-sm">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="font-title-md font-bold text-primary">SEBI Capability Index</h3>
+                            <p className="text-[11px] text-on-surface-variant">5-Pillar CSCRF Resilience Score</p>
+                        </div>
+                        <span className="text-[10px] bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded font-label-caps">
+                            Mandated 2024
+                        </span>
+                    </div>
+                    <SebiCapabilityRadar resilience={simResults?.sebi_resilience} height={190} />
+                </div>
+            </div>
+
+            {/* Middle Row: Monte Carlo Curve + Sensitivity Tornado Chart */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Monte Carlo Loss Curve */}
+                <div className="col-span-12 lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex flex-col justify-between elevate shadow-sm">
+                    <div className="mb-2">
+                        <div className="flex justify-between items-center">
+                            <h3 className="font-title-lg font-bold text-primary">Monte Carlo Loss Distribution</h3>
+                            <span className="text-xs text-on-surface-variant font-data-mono">10,000 Iterations</span>
+                        </div>
+                        <p className="font-body-sm text-xs text-on-surface-variant">
+                            Empirical loss probability density derived from Threat Frequency vs. Control Vulnerability.
+                        </p>
+                    </div>
+                    <MonteCarloCurve
+                        distributionCurve={simResults?.monte_carlo?.distribution_curve}
+                        meanLoss={simResults?.monte_carlo?.mean_expected_loss}
+                        var95={simResults?.monte_carlo?.var_95}
+                        var99={simResults?.monte_carlo?.var_99}
+                        height={220}
+                    />
+                </div>
+
+                {/* Sensitivity / Tornado Ranking */}
+                <div className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex flex-col justify-between elevate shadow-sm">
+                    <div className="mb-2">
+                        <h3 className="font-title-lg font-bold text-primary">Sensitivity / Risk Drivers</h3>
+                        <p className="font-body-sm text-xs text-on-surface-variant">
+                            Ranks parameters causing the largest swings in total financial exposure.
+                        </p>
+                    </div>
+                    <TornadoChart height={220} />
+                </div>
+            </div>
+
+            {/* Bottom Row: Simulation Sandbox & Business Unit Risk Acceptance */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* What-If Sandbox */}
+                <div className="col-span-12 lg:col-span-6 bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex flex-col justify-between elevate shadow-sm">
+                    <div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-title-lg font-bold text-primary">Simulation Sandbox</h3>
+                            <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded font-label-caps text-xs">
+                                Draft Mode
+                            </span>
+                        </div>
+
+                        {/* Budget Slider */}
+                        <div className="mb-4">
+                            <div className="flex justify-between mb-1.5">
+                                <label className="font-body-sm text-xs font-semibold">Security Budget Allocation</label>
+                                <span className="font-data-mono font-bold text-primary text-sm">
+                                    ₹{((budget / 100) * 1.5).toFixed(2)} Cr
+                                </span>
                             </div>
-                        ) : (
-                            <>
-                                <p className="text-body-sm whitespace-pre-wrap">{mainText}</p>
-                                {sourceTags.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-outline-variant/50">
-                                        <span className="material-symbols-outlined text-[14px] text-on-surface-variant mt-0.5">verified</span>
-                                        {sourceTags.map((tag, i) => (
-                                            <span key={i} className="px-2 py-0.5 bg-primary-container text-on-primary-container rounded font-label-caps text-label-caps">
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </>
+                            <input
+                                className="w-full h-1 bg-surface-variant rounded-lg cursor-pointer accent-primary"
+                                max="100"
+                                min="0"
+                                type="range"
+                                value={budget}
+                                onChange={handleBudgetChange}
+                            />
+                        </div>
+
+                        {/* Strategic Controls */}
+                        <div className="space-y-2 mb-4">
+                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-body-sm text-xs font-medium">Enforce Cloud MFA</span>
+                                    {optimizerPicks?.includes('Enforce Cloud MFA') && (
+                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
+                                            Recommended
+                                        </span>
+                                    )}
+                                </div>
+                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹45 Lakhs</span>
+                            </div>
+                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-body-sm text-xs font-medium">Patch Payment Gateway</span>
+                                    {optimizerPicks?.includes('Patch Payment Gateway') && (
+                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
+                                            Recommended
+                                        </span>
+                                    )}
+                                </div>
+                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹1.20 Cr</span>
+                            </div>
+                            <div className="flex items-center justify-between p-2.5 border border-outline-variant rounded bg-surface">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-body-sm text-xs font-medium">Zero Trust Architecture</span>
+                                    {optimizerPicks?.includes('Zero Trust Architecture') && (
+                                        <span className="px-1.5 py-0.2 bg-[#10b981]/15 text-[#10b981] rounded text-[10px] font-label-caps font-semibold">
+                                            Recommended
+                                        </span>
+                                    )}
+                                </div>
+                                <span className="font-data-mono text-xs text-on-surface-variant font-bold">₹3.50 Cr</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                        <button
+                            onClick={runSimulation}
+                            disabled={isSimulating}
+                            className="flex-1 bg-primary text-on-primary py-2.5 rounded-lg font-semibold text-xs hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                        >
+                            <span className={`material-symbols-outlined text-[16px] ${isSimulating ? 'animate-spin' : ''}`}>
+                                {isSimulating ? 'progress_activity' : 'refresh'}
+                            </span>
+                            {isSimulating ? 'Recalculating...' : 'Recalculate Optimizer'}
+                        </button>
+                        {simResults?.optimization && (
+                            <button
+                                onClick={approveOptimizer}
+                                disabled={isApproving}
+                                className="px-4 py-2.5 bg-[#10b981] text-white rounded-lg text-xs font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1"
+                            >
+                                <span className="material-symbols-outlined text-[16px]">lock</span>
+                                {isApproving ? 'Logging...' : 'Approve Plan'}
+                            </button>
                         )}
                     </div>
-                );
-            })}
-        </div>
-        <div className="p-3 border-t border-outline-variant bg-surface-container-low flex gap-2">
-            <input 
-                type="text" 
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Type your message..." 
-                className="flex-1 bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
+                </div>
+
+                {/* Risk by Business Unit Breakdown */}
+                <div className="col-span-12 lg:col-span-6 bg-surface-container-lowest border border-outline-variant rounded-xl p-5 flex flex-col justify-between elevate shadow-sm">
+                    <div>
+                        <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-title-lg font-bold text-primary">Risk by Business Unit</h3>
+                            <Link href="/ledger" className="text-xs text-primary font-semibold hover:underline flex items-center gap-1">
+                                Detailed Ledger <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                            </Link>
+                        </div>
+                        <p className="text-xs text-on-surface-variant mb-4">
+                            Annualized loss per business unit with 1-click on-chain risk acceptance.
+                        </p>
+
+                        <div className="space-y-3">
+                            {/* Unit 1 */}
+                            <div className="p-3 bg-surface border border-outline-variant rounded-lg flex flex-col justify-between gap-1.5">
+                                <div className="flex justify-between items-center">
+                                    <span className="font-body-sm font-semibold text-xs text-on-surface">Payment Processing & Checkout</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-data-mono font-bold text-xs text-[#ef4444]">₹2.00 Cr/yr</span>
+                                        <button
+                                            onClick={() => acceptRisk('Payment Processing', 20000000)}
+                                            disabled={acceptingRiskFor === 'Payment Processing'}
+                                            className="px-2 py-0.5 border border-outline-variant text-[10px] font-label-caps rounded hover:border-[#ef4444] hover:text-[#ef4444] transition-colors"
+                                        >
+                                            {acceptingRiskFor === 'Payment Processing' ? 'Logging...' : 'Accept Risk'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
+                                    <div className="bg-[#ef4444] h-2 rounded" style={{ width: '45%' }}></div>
+                                </div>
+                            </div>
+
+                            {/* Unit 2 */}
+                            <div className="p-3 bg-surface border border-outline-variant rounded-lg flex flex-col justify-between gap-1.5">
+                                <div className="flex justify-between items-center">
+                                    <span className="font-body-sm font-semibold text-xs text-on-surface">Retail Banking Operations</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-data-mono font-bold text-xs text-[#f59e0b]">₹1.20 Cr/yr</span>
+                                        <button
+                                            onClick={() => acceptRisk('Retail Operations', 12000000)}
+                                            disabled={acceptingRiskFor === 'Retail Operations'}
+                                            className="px-2 py-0.5 border border-outline-variant text-[10px] font-label-caps rounded hover:border-[#ef4444] hover:text-[#ef4444] transition-colors"
+                                        >
+                                            {acceptingRiskFor === 'Retail Operations' ? 'Logging...' : 'Accept Risk'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
+                                    <div className="bg-[#f59e0b] h-2 rounded" style={{ width: '28%' }}></div>
+                                </div>
+                            </div>
+
+                            {/* Unit 3 */}
+                            <div className="p-3 bg-surface border border-outline-variant rounded-lg flex flex-col justify-between gap-1.5">
+                                <div className="flex justify-between items-center">
+                                    <span className="font-body-sm font-semibold text-xs text-on-surface">Corporate IT & Identity</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-data-mono font-bold text-xs text-[#3b82f6]">₹0.68 Cr/yr</span>
+                                        <button
+                                            onClick={() => acceptRisk('Corporate IT', 6800000)}
+                                            disabled={acceptingRiskFor === 'Corporate IT'}
+                                            className="px-2 py-0.5 border border-outline-variant text-[10px] font-label-caps rounded hover:border-[#ef4444] hover:text-[#ef4444] transition-colors"
+                                        >
+                                            {acceptingRiskFor === 'Corporate IT' ? 'Logging...' : 'Accept Risk'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
+                                    <div className="bg-[#3b82f6] h-2 rounded" style={{ width: '15%' }}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-outline-variant mt-2 text-xs text-on-surface-variant flex justify-between items-center">
+                        <span>Total Portfolio Exposure:</span>
+                        <span className="font-data-mono font-bold text-primary text-sm">
+                            {simResults?.monte_carlo ? formatCr(simResults.monte_carlo.mean_expected_loss) : "₹4.28 Cr"}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Declarative Risk Model Inspector Drawer */}
+            <CrmlDrawer
+                isOpen={isCrmlOpen}
+                onClose={() => setIsCrmlOpen(false)}
+                meanExpectedLoss={simResults?.monte_carlo?.mean_expected_loss}
+                var95={simResults?.monte_carlo?.var_95}
+                isDpdpActive={true}
             />
-            <button onClick={sendMessage} disabled={isChatSending} className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90 active:scale-90 transition-transform disabled:opacity-60">
-                <span className="material-symbols-outlined">{isChatSending ? 'hourglass_top' : 'send'}</span>
+
+            {/* AI Assistant Chat Panel */}
+            {isChatOpen && (
+                <div className="fixed bottom-24 right-8 w-96 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl flex flex-col overflow-hidden z-50 animate-fade-scale-in">
+                    <div className="bg-primary text-on-primary p-3.5 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[18px]">smart_toy</span>
+                            <h3 className="font-title-md font-bold text-sm">Virtual CISO Agent</h3>
+                        </div>
+                        <button onClick={() => setIsChatOpen(false)} className="hover:opacity-80">
+                            <span className="material-symbols-outlined text-[18px]">close</span>
+                        </button>
+                    </div>
+
+                    <div className="h-80 overflow-y-auto p-4 bg-surface flex flex-col gap-2 custom-scrollbar">
+                        {chatMessages.length === 0 && (
+                            <div className="text-on-surface-variant text-xs text-center mt-6">
+                                Ask the Virtual CISO about RBI/SEBI/DPDP compliance regulations, telemetry status, or budget optimization...
+                            </div>
+                        )}
+                        {chatMessages.map((msg, idx) => {
+                            const sourceMatch = msg.content.match(/\n*Sources?:\s*([A-Za-z0-9,\/ ]+)\s*$/i);
+                            const mainText = sourceMatch ? msg.content.slice(0, sourceMatch.index) : msg.content;
+                            const sourceTags = sourceMatch
+                                ? sourceMatch[1].split(',').map((s) => s.trim()).filter(Boolean)
+                                : [];
+
+                            return (
+                                <div
+                                    key={idx}
+                                    className={`p-3 rounded-lg max-w-[85%] text-xs ${msg.role === 'user' ? 'bg-primary-container text-on-primary-container self-end' : 'bg-surface-variant text-on-surface-variant self-start'}`}
+                                >
+                                    <p className="whitespace-pre-wrap">{mainText}</p>
+                                    {sourceTags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2 pt-1.5 border-t border-outline-variant/40">
+                                            {sourceTags.map((tag, i) => (
+                                                <span key={i} className="px-1.5 py-0.2 bg-primary-container text-on-primary-container rounded text-[10px] font-label-caps">
+                                                    {tag}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="p-2.5 border-t border-outline-variant bg-surface-container-low flex gap-1.5">
+                        <input
+                            type="text"
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                            placeholder="Ask Virtual CISO..."
+                            className="flex-1 bg-surface border border-outline-variant rounded px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:border-primary"
+                        />
+                        <button
+                            onClick={sendMessage}
+                            disabled={isChatSending}
+                            className="bg-primary text-on-primary p-2 rounded flex items-center justify-center hover:opacity-90 disabled:opacity-50"
+                        >
+                            <span className="material-symbols-outlined text-[16px]">
+                                {isChatSending ? 'hourglass_top' : 'send'}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Floating Chat Trigger Button */}
+            <button
+                onClick={() => setIsChatOpen(!isChatOpen)}
+                className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-xl z-50 hover:scale-105 active:scale-95 transition-all"
+                aria-label="Virtual CISO Assistant"
+            >
+                <span className="material-symbols-outlined text-[24px]">
+                    {isChatOpen ? 'close' : 'auto_awesome'}
+                </span>
             </button>
         </div>
-    </div>
-)}
-
-<button 
-    onClick={() => setIsChatOpen(!isChatOpen)}
-    className="fixed bottom-stack-lg right-stack-lg w-[60px] h-[60px] rounded-full bg-primary-container text-on-primary flex items-center justify-center shadow-lg z-50 hover:bg-opacity-90 hover:scale-105 transition-all active:scale-95" 
-    aria-label="AI Assistant"
->
-    <span className={`material-symbols-outlined text-[28px] fill-icon transition-transform duration-300 ${isChatOpen ? 'rotate-90' : 'rotate-0'}`}>
-        {isChatOpen ? 'close' : 'auto_awesome'}
-    </span>
-</button>
-        </>
     );
 }
