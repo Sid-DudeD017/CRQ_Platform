@@ -12,5 +12,16 @@ const nextConfig = {
       dynamic: 0,
     },
   },
+  // Local-dev convenience: lets the frontend call relative /api/... paths
+  // without hitting CORS. Only matters when NEXT_PUBLIC_API_URL isn't set -
+  // a deployed frontend still points at its real backend via that env var.
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://127.0.0.1:8000/api/:path*',
+      },
+    ]
+  }
 };
 export default nextConfig;

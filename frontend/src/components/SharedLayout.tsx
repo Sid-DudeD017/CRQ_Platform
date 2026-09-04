@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { API_BASE } from '@/lib/api';
+import VirtualCisoChat from './VirtualCisoChat';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -218,13 +219,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 {/* Main Content Wrapper */}
                 <main className="flex-1 p-container-padding bg-background overflow-y-auto w-full relative">
                     {children}
-                    {/* Note: the floating "AI Assistant" chat button lives inside
-                        page.tsx (the home dashboard), wired to a real chat panel
-                        and the backend. A second, non-functional decorative copy
-                        used to sit here too, stacked exactly on top of it, which
-                        is why clicking the button appeared to do nothing - you
-                        were always clicking this dead one instead of the real
-                        one underneath. Removed rather than duplicated. */}
+                    <VirtualCisoChat />
                 </main>
             </div>
             

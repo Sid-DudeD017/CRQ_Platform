@@ -1,107 +1,121 @@
-@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@500&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --primary: #000000;
-  --inverse-primary: #bec6e0;
-  --on-primary-fixed: #131b2e;
-  --on-secondary: #ffffff;
-  --primary-fixed-dim: #bec6e0;
-  --surface-dim: #d8dadc;
-  --surface: #f7f9fb;
-  --tertiary-fixed: #fcdeb5;
-  --on-surface: #191c1e;
-  --tertiary: #000000;
-  --tertiary-container: #271901;
-  --outline-variant: #c6c6cd;
-  --error: #ba1a1a;
-  --surface-bright: #f7f9fb;
-  --on-surface-variant: #45464d;
-  --outline: #76777d;
-  --on-error: #ffffff;
-  --background: #f7f9fb;
-  --on-tertiary-container: #98805d;
-  --secondary: #515f74;
-  --surface-container-lowest: #ffffff;
-  --primary-container: #131b2e;
-  --surface-container-low: #f2f4f6;
-  --on-tertiary-fixed: #271901;
-  --on-background: #191c1e;
-  --surface-container: #eceef0;
-  --secondary-fixed: #d5e3fd;
-  --surface-container-highest: #e0e3e5;
-  --surface-container-high: #e6e8ea;
+  --primary: #09090b;
+  --inverse-primary: #93c5fd;
   --on-primary: #ffffff;
-  --primary-fixed: #dae2fd;
-  --surface-tint: #565e74;
-  --tertiary-fixed-dim: #dec29a;
-  --on-secondary-fixed: #0d1c2f;
-  --on-secondary-fixed-variant: #3a485c;
-  --secondary-container: #d5e3fd;
-  --on-tertiary-fixed-variant: #574425;
-  --on-primary-container: #7c839b;
-  --error-container: #ffdad6;
-  --surface-variant: #e0e3e5;
-  --on-primary-fixed-variant: #3f465c;
-  --inverse-on-surface: #eff1f3;
-  --secondary-fixed-dim: #b9c7e0;
-  --on-error-container: #93000a;
-  --inverse-surface: #2d3133;
+  --on-primary-fixed: #09090b;
+  --primary-container: #18181b;
+  --on-primary-container: #ffffff;
+  --primary-fixed: #e4e4e7;
+  --primary-fixed-dim: #d4d4d8;
+  --on-primary-fixed-variant: #27272a;
+
+  --secondary: #2563eb;
+  --on-secondary: #ffffff;
+  --secondary-container: #eff6ff;
+  --on-secondary-container: #1e40af;
+  --secondary-fixed: #dbeafe;
+  --secondary-fixed-dim: #bfdbfe;
+  --on-secondary-fixed: #1e3a8a;
+  --on-secondary-fixed-variant: #1d4ed8;
+
+  --tertiary: #059669;
   --on-tertiary: #ffffff;
-  --on-secondary-container: #57657b;
+  --tertiary-container: #d1fae5;
+  --on-tertiary-container: #065f46;
+  --tertiary-fixed: #d1fae5;
+  --tertiary-fixed-dim: #a7f3d0;
+  --on-tertiary-fixed: #064e3b;
+  --on-tertiary-fixed-variant: #047857;
+
+  --background: #fafafa;
+  --on-background: #09090b;
+  --surface: #ffffff;
+  --on-surface: #09090b;
+  --surface-dim: #f4f4f5;
+  --surface-bright: #ffffff;
+  --surface-variant: #e4e4e7;
+  --on-surface-variant: #52525b;
+
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f4f4f5;
+  --surface-container: #e4e4e7;
+  --surface-container-high: #d4d4d8;
+  --surface-container-highest: #a1a1aa;
+
+  --outline: #71717a;
+  --outline-variant: #e4e4e7;
+  --surface-tint: #09090b;
+
+  --error: #dc2626;
+  --on-error: #ffffff;
+  --error-container: #fee2e2;
+  --on-error-container: #991b1b;
+
+  --inverse-surface: #09090b;
+  --inverse-on-surface: #fafafa;
 }
 
 .dark {
-  --primary: #b8c4e8;
-  --inverse-primary: #000000;
-  --on-primary-fixed: #131b2e;
-  --on-secondary: #0d1c2f;
-  --primary-fixed-dim: #bec6e0;
-  --surface-dim: #0c0d0f;
-  --surface: #121316;
-  --tertiary-fixed: #fcdeb5;
-  --on-surface: #e3e5e8;
-  --tertiary: #f0c98a;
-  --tertiary-container: #4a3813;
-  --outline-variant: #3d3f45;
-  --error: #ffb4ab;
-  --surface-bright: #383a40;
-  --on-surface-variant: #c3c5cc;
-  --outline: #8d8f96;
-  --on-error: #690005;
-  --background: #0e0f12;
-  --on-tertiary-container: #ffdfae;
-  --secondary: #b3c2de;
-  --surface-container-lowest: #08090b;
-  --primary-container: #2b3550;
-  --surface-container-low: #191b1f;
-  --on-tertiary-fixed: #271901;
-  --on-background: #e3e5e8;
-  --surface-container: #1d1f24;
-  --secondary-fixed: #d5e3fd;
-  --surface-container-highest: #2e3137;
-  --surface-container-high: #282a30;
-  --on-primary: #101426;
-  --primary-fixed: #dae2fd;
-  --surface-tint: #b8c4e8;
-  --tertiary-fixed-dim: #dec29a;
-  --on-secondary-fixed: #0d1c2f;
-  --on-secondary-fixed-variant: #3a485c;
-  --secondary-container: #384a63;
-  --on-tertiary-fixed-variant: #574425;
-  --on-primary-container: #dbe1f9;
-  --error-container: #93000a;
-  --surface-variant: #45464d;
-  --on-primary-fixed-variant: #3f465c;
-  --inverse-on-surface: #191c1e;
-  --secondary-fixed-dim: #b9c7e0;
-  --on-error-container: #ffdad6;
-  --inverse-surface: #e3e5e8;
-  --on-tertiary: #452f00;
-  --on-secondary-container: #d7e3fb;
+  --primary: #60a5fa;
+  --inverse-primary: #1e40af;
+  --on-primary: #000000;
+  --on-primary-fixed: #000000;
+  --primary-container: #090d16;
+  --on-primary-container: #dbeafe;
+  --primary-fixed: #1e3a8a;
+  --primary-fixed-dim: #1d4ed8;
+  --on-primary-fixed-variant: #93c5fd;
+
+  --secondary: #38bdf8;
+  --on-secondary: #000000;
+  --secondary-container: #081a2e;
+  --on-secondary-container: #e0f2fe;
+  --secondary-fixed: #075985;
+  --secondary-fixed-dim: #0369a1;
+  --on-secondary-fixed: #e0f2fe;
+  --on-secondary-fixed-variant: #bae6fd;
+
+  --tertiary: #34d399;
+  --on-tertiary: #000000;
+  --tertiary-container: #04241c;
+  --on-tertiary-container: #d1fae5;
+  --tertiary-fixed: #065f46;
+  --tertiary-fixed-dim: #047857;
+  --on-tertiary-fixed: #d1fae5;
+  --on-tertiary-fixed-variant: #a7f3d0;
+
+  --background: #000000;
+  --on-background: #f4f4f5;
+  --surface: #070709;
+  --on-surface: #f4f4f5;
+  --surface-dim: #000000;
+  --surface-bright: #121217;
+  --surface-variant: #18181f;
+  --on-surface-variant: #a1a1aa;
+
+  --surface-container-lowest: #000000;
+  --surface-container-low: #08080a;
+  --surface-container: #0f0f13;
+  --surface-container-high: #16171d;
+  --surface-container-highest: #202129;
+
+  --outline: #3f3f46;
+  --outline-variant: #18181f;
+  --surface-tint: #60a5fa;
+
+  --error: #f87171;
+  --on-error: #000000;
+  --error-container: #450a0a;
+  --on-error-container: #fecaca;
+
+  --inverse-surface: #f4f4f5;
+  --inverse-on-surface: #000000;
 }
 
 /* smooth theme switch instead of an abrupt flash */

@@ -3,11 +3,13 @@ import operator
 import os
 
 from dotenv import load_dotenv
-# Load ai-agent/.env explicitly (not just python-dotenv's default cwd
-# lookup) since this module gets imported via a sys.path hack from
-# backend/main.py, which is normally launched from the repo root, not
-# from inside ai-agent/.
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+# Load environment variables from multiple possible locations to make configuration easier
+base_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(base_dir)
+
+load_dotenv(os.path.join(base_dir, ".env"))            # ai-agent/.env
+load_dotenv(os.path.join(project_root, "backend", ".env")) # backend/.env
+load_dotenv(os.path.join(project_root, ".env"))        # root .env
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END, MessagesState
@@ -95,7 +97,13 @@ def _general_chat_reply(last_message: str):
     directly, same as a normal chatbot would.
     """
     if not llm:
-        return None
+        last_msg = last_message.lower()
+        if "ledger" in last_msg or "blockchain" in last_msg:
+            return "The Zero-Trust Blockchain Ledger is currently operating in local mock mode. Please ensure your Hardhat EVM is running and connected to accept real risk transactions on-chain."
+        elif "redundant" in last_msg or "repeat" in last_msg or "llm" in last_msg or "key" in last_msg:
+            return "I am currently running in offline fallback mode because no LLM API key is configured. Please add an OPENAI_API_KEY or GROQ_API_KEY to ai-agent/.env for full dynamic conversations."
+        return "I am the Virtual CISO. (Offline Mode: No LLM API Key configured). I can help you query telemetry, optimize budgets, or check compliance frameworks. How can I assist you today?"
+        
     try:
         general_prompt = ChatPromptTemplate.from_messages([
             ("system",
