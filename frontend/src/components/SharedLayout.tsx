@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -8,10 +8,11 @@ import { API_BASE } from '@/lib/api';
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
-    const { token, username, loginAs, logout, loginError } = useAuth();
+    const { token, username, loginAs, logout, loginError, loggingInRole } = useAuth();
     const { theme, toggleTheme } = useTheme();
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
     const [isNewAnalysisOpen, setIsNewAnalysisOpen] = useState(false);
     const [analysisLabel, setAnalysisLabel] = useState('');
     const [analysisBudgetCr, setAnalysisBudgetCr] = useState(10);
@@ -55,18 +56,31 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         { path: '/ledger', icon: 'receipt_long', label: 'Ledger' },
         { path: '/ingestion', icon: 'input', label: 'Ingestion' },
         { path: '/training', icon: 'model_training', label: 'Training' },
+        { path: '/calibration', icon: 'target', label: 'Calibration' },
         { path: '/reports', icon: 'assessment', label: 'Reports' },
     ];
+
+    useEffect(() => {
+        setIsMobileNavOpen(false);
+    }, [pathname]);
 
     return (
         <div className="bg-background text-on-background font-body-md min-h-screen flex flex-col">
             {/* TopNavBar */}
             <nav className="bg-surface border-b border-outline-variant docked full-width top-0 z-50 shadow-[0_2px_12px_-6px_rgba(0,0,0,0.12)]">
-                <div className="flex justify-between items-center w-full px-container-padding max-w-[1440px] mx-auto h-16">
-                    <div className="flex items-center gap-gutter">
+                <div className="flex flex-wrap justify-between items-center gap-y-2 w-full px-4 sm:px-container-padding max-w-[1440px] mx-auto min-h-16 py-2">
+                    <div className="flex items-center gap-stack-sm sm:gap-gutter">
+                        <button
+                            onClick={() => setIsMobileNavOpen((v) => !v)}
+                            className="md:hidden text-on-surface-variant hover:text-primary transition-colors"
+                            aria-label={isMobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                            aria-expanded={isMobileNavOpen}
+                        >
+                            <span className="material-symbols-outlined">{isMobileNavOpen ? 'close' : 'menu'}</span>
+                        </button>
                         <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
                     </div>
-                    <div className="flex items-center gap-stack-md">
+                    <div className="flex items-center flex-wrap justify-end gap-2 sm:gap-stack-md">
                         <Link href="/support" className="text-on-surface-variant hover:text-primary transition-colors" aria-label="Help">
                             <span className="material-symbols-outlined">help</span>
                         </Link>
@@ -100,14 +114,28 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         {username ? (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
                                 <span className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
-                                <span className="text-on-surface">Logged in: {username}</span>
+                                <span className="text-on-surface whitespace-nowrap"><span className="hidden sm:inline">Logged in: </span>{username}</span>
                                 <button onClick={logout} className="text-on-surface-variant hover:text-error underline ml-1">Logout</button>
                             </div>
                         ) : (
                             <div className="flex items-center gap-2">
-                                <button onClick={() => loginAs('ciso')} className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors">Login as CISO</button>
-                                <button onClick={() => loginAs('cfo')} className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors">Login as CFO</button>
-                                {loginError && <span className="text-error text-label-caps">{loginError}</span>}
+                                <button
+                                    onClick={() => loginAs('ciso')}
+                                    disabled={loggingInRole !== null}
+                                    className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1 whitespace-nowrap"
+                                >
+                                    {loggingInRole === 'ciso' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                                    <span className="hidden sm:inline">Login as </span>CISO
+                                </button>
+                                <button
+                                    onClick={() => loginAs('cfo')}
+                                    disabled={loggingInRole !== null}
+                                    className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1 whitespace-nowrap"
+                                >
+                                    {loggingInRole === 'cfo' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                                    <span className="hidden sm:inline">Login as </span>CFO
+                                </button>
+                                {loginError && <span className="text-error text-label-caps max-w-[160px] sm:max-w-none">{loginError}</span>}
                             </div>
                         )}
                         <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container border border-outline-variant ml-2 flex items-center justify-center font-label-caps text-label-caps font-bold">
@@ -116,6 +144,40 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     </div>
                 </div>
             </nav>
+
+            {/* Mobile nav drawer - same destinations as the desktop sidebar,
+                since that sidebar is hidden below md and would otherwise
+                leave mobile visitors with no way to reach Investment,
+                Ledger, Ingestion, Training or Reports. */}
+            {isMobileNavOpen && (
+                <div className="md:hidden bg-surface-container-low border-b border-outline-variant docked full-width z-40 shadow-lg animate-fade-scale-in">
+                    <div className="p-gutter flex flex-col gap-unit max-w-[1440px] mx-auto w-full">
+                        <button
+                            onClick={() => { setIsNewAnalysisOpen(true); setIsMobileNavOpen(false); }}
+                            className="w-full bg-primary text-on-primary font-body-sm text-body-sm py-2 px-4 rounded font-semibold mb-stack-sm hover:bg-opacity-90 transition-opacity"
+                        >
+                            + New Analysis
+                        </button>
+                        {navItems.map((item) => {
+                            const isActive = pathname === item.path;
+                            return (
+                                <Link key={item.path} href={item.path} className={`relative flex items-center gap-stack-sm px-3 py-2 rounded-lg font-label-caps text-label-caps transition-all duration-150 active:scale-95 ${isActive ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
+                                    {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-primary" />}
+                                    <span className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
+                                </Link>
+                            );
+                        })}
+                        <div className="flex flex-col gap-unit pt-stack-sm mt-stack-sm border-t border-outline-variant">
+                            <Link href="/support" className="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg">
+                                <span className="material-symbols-outlined text-[18px]">help_outline</span> Support
+                            </Link>
+                            <Link href="/docs" className="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg">
+                                <span className="material-symbols-outlined text-[18px]">description</span> Documentation
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="flex flex-1 max-w-[1440px] mx-auto w-full">
                 {/* SideNavBar */}
@@ -193,10 +255,11 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
 
                             <div>
                                 <div className="flex justify-between mb-2">
-                                    <label className="font-body-sm text-body-sm font-medium">Security Budget</label>
-                                    <span className="font-data-mono text-data-mono font-bold">₹{analysisBudgetCr} Cr</span>
+                                    <label htmlFor="new-analysis-budget" className="font-body-sm text-body-sm font-medium">Security Budget</label>
+                                    <span className="font-data-mono text-data-mono font-bold" aria-hidden="true">₹{analysisBudgetCr} Cr</span>
                                 </div>
                                 <input
+                                    id="new-analysis-budget"
                                     type="range"
                                     min="0"
                                     max="15"
@@ -204,6 +267,8 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     value={analysisBudgetCr}
                                     onChange={(e) => setAnalysisBudgetCr(Number(e.target.value))}
                                     className="w-full h-1 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
+                                    aria-label="Security budget in crores of rupees"
+                                    aria-valuetext={`₹${analysisBudgetCr} crore`}
                                 />
                             </div>
 

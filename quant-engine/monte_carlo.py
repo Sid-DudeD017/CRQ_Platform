@@ -28,16 +28,26 @@ def run_fair_monte_carlo(
     primary_loss = np.random.triangular(plm_min, plm_mode, plm_max, num_simulations)
     
     if is_dpdp_applicable:
-        # [NEW DPDP MANDATE] Combine both statutory penalties
-        safeguard_penalty = 2500000000.0        # ₹250 Crores
-        breach_notification_penalty = 2000000000.0 # ₹200 Crores
-        dpdp_penalty_limit = safeguard_penalty + breach_notification_penalty # ₹450 Crores total exposure
-        
-        slm_max_adjusted = max(slm_max, dpdp_penalty_limit)
-        slm_mode_adjusted = min(slm_mode + (dpdp_penalty_limit * 0.05), slm_max_adjusted)
+        # [DPDP MANDATE] The DPDP Act's statutory penalties (up to ₹250 Cr
+        # for safeguard failures + ₹200 Cr for breach-notification
+        # failures = ₹450 Cr) are a regulatory CEILING - the maximum a
+        # court could ever levy for the worst possible violation - not a
+        # typical per-incident cost. The previous version used that ceiling
+        # directly as this distribution's max and added 5% of it
+        # (Rs 22.5 Cr) to mode on *every* simulated loss event, which made
+        # a rare worst-case fine look like the routine outcome and
+        # dominated ALE/VaR by several orders of magnitude. DPDP exposure
+        # is real and should raise expected loss - it just shouldn't be
+        # modeled as "expect tens of crores in fines on every incident."
+        # Scale the existing business-value-derived distribution instead
+        # of overriding it with the statutory cap.
+        slm_max_adjusted = slm_max * 2.0     # DPDP roughly doubles the realistic worst case
+        slm_mode_adjusted = slm_mode * 1.5   # and raises the typical case by half
         secondary_loss = np.random.triangular(slm_min, slm_mode_adjusted, slm_max_adjusted, num_simulations)
+        slm_max_used = slm_max_adjusted      # actual ceiling this distribution was drawn from
     else:
         secondary_loss = np.random.triangular(slm_min, slm_mode, slm_max, num_simulations)
+        slm_max_used = slm_max
         
     total_loss_magnitude = primary_loss + secondary_loss
     
@@ -56,8 +66,22 @@ def run_fair_monte_carlo(
     # cci_anticipate, and therefore the overall score, negative.
     cci_anticipate = max(0.0, min(5.0, (100 - np.mean(tef)) / 20))
     cci_withstand = max(0.0, min(5.0, np.mean(control_str) / 20))
-    cci_contain = max(0.0, min(5.0, 5.0 * (10000000 / max(1, np.mean(secondary_loss)))))
-    cci_recover = max(0.0, min(5.0, 5.0 * (5000000 / max(1, np.mean(primary_loss)))))
+    # Contain/Recover used to compare the mean simulated loss against a
+    # fixed absolute reference (Rs 1 Cr / Rs 50L) - calibrated for a much
+    # larger company than the mock data ever generates (typical plm_mode/
+    # slm_mode here are in the low lakhs), so both pinned at the 5/5
+    # ceiling on nearly every run regardless of actual posture. Comparing
+    # against each company's own worst-case (plm_max/slm_max) instead
+    # makes this scale-invariant - the score reflects how close the
+    # *typical* simulated outcome runs to *this company's own* worst case,
+    # which is what "containment/recovery capability" should mean,
+    # whether the company is a startup or a bank.
+    # Use slm_max_used (not the raw slm_max parameter) so this stays correct
+    # when DPDP applicability widened the actual sampled ceiling above -
+    # otherwise contain gets compared against a smaller max than the
+    # distribution was actually drawn from and pins near 0.
+    cci_contain = max(0.0, min(5.0, 5.0 * (1.0 - (np.mean(secondary_loss) / max(1.0, slm_max_used)))))
+    cci_recover = max(0.0, min(5.0, 5.0 * (1.0 - (np.mean(primary_loss) / max(1.0, plm_max)))))
     
     cci_score = (cci_anticipate + cci_withstand + cci_contain + cci_recover) / 4.0
     cci_evolve = max(0.0, min(5.0, cci_score * 1.1)) # Evolution metric

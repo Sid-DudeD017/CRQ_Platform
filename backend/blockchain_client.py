@@ -24,10 +24,19 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from web3 import Web3
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_PATH = REPO_ROOT / "blockchain" / "artifacts" / "contracts" / "AuditLedger.sol" / "AuditLedger.json"
+
+# main.py does `from . import blockchain_client, ...` BEFORE
+# `from .database import ...` - database.py is what calls load_dotenv() for
+# backend/.env, so without this call this module's os.getenv() calls below
+# would run first and silently miss anything set in .env (CONTRACT_ADDRESS
+# after a redeploy, a non-default WEB3_PROVIDER_URL, etc). Load it here too
+# so this module doesn't depend on some other module's import order.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL", "http://127.0.0.1:8545")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3")

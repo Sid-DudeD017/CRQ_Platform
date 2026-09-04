@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { API_BASE } from '@/lib/api';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 
 interface Decision {
     id: number;
@@ -14,47 +17,255 @@ interface Decision {
     board_approved: boolean;
 }
 
+interface SebiResilience {
+    cci_score?: number;
+    anticipate?: number;
+    withstand?: number;
+    contain?: number;
+    recover?: number;
+    evolve?: number;
+}
+
+interface OptimizedAllocation {
+    status?: string;
+    selected_patches?: string[];
+    total_cost?: number;
+    total_risk_reduced?: number;
+}
+
+interface FrameworkCoverageRow {
+    id: string;
+    active: boolean;
+    nist_csf: string;
+    iso27001: string;
+    cis_controls: string;
+}
+
+interface SimRun {
+    id: number;
+    timestamp: string;
+    expected_annual_loss: number;
+    var_95: number | null;
+    var_99: number | null;
+    budget_used: number | null;
+    active_controls: Record<string, boolean>;
+    optimized_budget_allocation: OptimizedAllocation;
+    sebi_resilience: SebiResilience;
+    risk_drivers?: Record<string, any>;
+    framework_coverage?: FrameworkCoverageRow[];
+}
+
 const REPORT_LIBRARY = [
     {
         icon: 'account_balance',
-        title: 'RBI Cyber Resilience & Board Oversight Report',
+        title: 'RBI Cyber Resilience & Board Oversight',
         framework: 'RBI',
-        body: "Certifies that every risk-acceptance decision above materiality carries explicit board or audit-committee sign-off, per RBI's cyber resilience mandate. Each decision on the ledger is stamped board_approved: true/false at accept time and committed with that flag on-chain.",
-        source: 'Source: GET /api/audit-log → board_approved per decision',
+        body: 'Every risk-acceptance decision is stamped with an explicit board_approved sign-off, committed on-chain.',
     },
     {
         icon: 'shield',
         title: 'SEBI CSCRF Cyber Capability Index',
         framework: 'SEBI',
-        body: 'A five-pillar resilience score (0-5 each) recomputed on every simulation run: Anticipate (inverse of threat-event frequency), Withstand (control strength), Contain (secondary loss containment), Recover (primary loss recovery speed), and Evolve (Withstand extrapolated forward). All four are clamped to [0, 5] before averaging into the composite cci_score.',
-        source: 'Source: POST /api/simulate-risk → sebi_resilience',
+        body: 'Five-pillar resilience score (0-5), recomputed on every simulation run.',
     },
     {
         icon: 'gavel',
         title: 'DPDP Act Impact Assessment',
         framework: 'DPDP',
-        body: "Auto-triggers when any PII-classified asset's network-effective vulnerability (intrinsic score plus 20% of connected-neighbor exposure - the 'blast radius' calculation) exceeds 7.0. When triggered, the FAIR loss model applies DPDP-specific probable-loss magnitudes to the simulation.",
-        source: 'Source: POST /api/simulate-risk → contextual is_dpdp_applicable trigger',
+        body: "Auto-triggers when a PII asset's network-effective vulnerability crosses 7.0.",
     },
     {
         icon: 'rule',
         title: 'NIST CSF Alignment Summary',
         framework: 'NIST',
-        body: 'Maps live telemetry signals - patch status, EDR health, MFA coverage, cloud misconfigurations, CISA KEV presence - back onto the five NIST CSF functions (Identify, Protect, Detect, Respond, Recover) that the deduction logic in the risk engine is modeled against.',
-        source: 'Source: GET /api/telemetry, deduction logic in backend/main.py::simulate_risk',
+        body: 'Live telemetry mapped onto the five NIST CSF functions.',
+    },
+    {
+        icon: 'verified_user',
+        title: 'ISO/IEC 27001:2022 Annex A Crosswalk',
+        framework: 'ISO 27001',
+        body: 'Every Strategic Control mapped to its Annex A control, live against the current run - see the Framework Coverage Matrix below.',
+    },
+    {
+        icon: 'checklist',
+        title: 'CIS Controls v8 Safeguard Mapping',
+        framework: 'CIS',
+        body: 'Every Strategic Control mapped to its CIS v8 Safeguard, live against the current run - see the Framework Coverage Matrix below.',
     },
 ];
 
+// A fixed, realistic sequence of six /api/simulate-risk calls - real
+// budgets against real Strategic Control combinations, walked up in
+// roughly the same ROSI order the Efficiency Frontier on Investment uses
+// (see frontend/src/app/optimize/page.tsx's PATCHES list) - so the
+// resulting history tells a coherent "posture improving" story instead of
+// random noise. This exists purely to give the Simulation Analysis Ledger
+// something real to show before a first real run has happened (e.g.
+// right after a fresh clone, or right after Clear Ledger) - every number
+// it produces is genuinely computed by the FAIR Monte Carlo engine from
+// these inputs, nothing here is fabricated or hardcoded as output.
+const SEED_RUNS: { budget: number; controls: Record<string, boolean> }[] = [
+    { budget: 500000, controls: {} },
+    { budget: 1000000, controls: { 'Enforce Cloud MFA': true } },
+    { budget: 2500000, controls: { 'Enforce Cloud MFA': true, 'Least-Privilege IAM Review': true, 'EDR Health Remediation': true } },
+    {
+        budget: 4500000,
+        controls: {
+            'Enforce Cloud MFA': true,
+            'Least-Privilege IAM Review': true,
+            'EDR Health Remediation': true,
+            'Host Isolation & Incident Containment': true,
+            'Public Exposure Hardening (WAF)': true,
+        },
+    },
+    {
+        budget: 6500000,
+        controls: {
+            'Enforce Cloud MFA': true,
+            'Least-Privilege IAM Review': true,
+            'EDR Health Remediation': true,
+            'Host Isolation & Incident Containment': true,
+            'Public Exposure Hardening (WAF)': true,
+            'CSPM Auto-Remediation': true,
+            'Patch Payment Gateway': true,
+        },
+    },
+    {
+        budget: 9000000,
+        controls: {
+            'Enforce Cloud MFA': true,
+            'Least-Privilege IAM Review': true,
+            'EDR Health Remediation': true,
+            'Host Isolation & Incident Containment': true,
+            'Public Exposure Hardening (WAF)': true,
+            'CSPM Auto-Remediation': true,
+            'Patch Payment Gateway': true,
+            'Threat Intel & KEV Patch Program': true,
+            '24/7 SOC Monitoring': true,
+            'Zero Trust Architecture': true,
+            'PII Data Minimization & Tokenization': true,
+        },
+    },
+];
+
+function activeControlNames(run: SimRun): string[] {
+    return Object.entries(run.active_controls || {})
+        .filter(([, v]) => !!v)
+        .map(([k]) => k);
+}
+
+function roiPct(run: SimRun): number | null {
+    const opt = run.optimized_budget_allocation;
+    if (!opt || !opt.total_cost || opt.total_cost <= 0) return null;
+    return ((opt.total_risk_reduced! - opt.total_cost) / opt.total_cost) * 100;
+}
+
+interface Insights {
+    tone: 'up' | 'down' | 'flat';
+    lines: string[];
+}
+
+// Every line here is derived from a real diff between the two most recent
+// persisted RiskSimulation rows (see GET /api/simulations) - which
+// Strategic Controls actually changed, how the SEBI CCI score moved, ROI
+// on the optimizer's spend. Nothing here is a guessed root cause: when the
+// data doesn't point at a specific driver, the copy says so explicitly
+// (Monte Carlo sampling variance) rather than inventing one.
+function buildInsights(runs: SimRun[]): Insights | null {
+    if (runs.length < 2) return null;
+    const [latest, prev] = runs;
+    if (!prev.expected_annual_loss) return null;
+
+    const aleDelta = ((latest.expected_annual_loss - prev.expected_annual_loss) / prev.expected_annual_loss) * 100;
+    const varDelta = prev.var_95 && latest.var_95 ? ((latest.var_95 - prev.var_95) / prev.var_95) * 100 : null;
+
+    const latestOn = new Set(activeControlNames(latest));
+    const prevOn = new Set(activeControlNames(prev));
+    const turnedOn = Array.from(latestOn).filter((c) => !prevOn.has(c));
+    const turnedOff = Array.from(prevOn).filter((c) => !latestOn.has(c));
+
+    const cciDelta =
+        latest.sebi_resilience?.cci_score != null && prev.sebi_resilience?.cci_score != null
+            ? latest.sebi_resilience.cci_score - prev.sebi_resilience.cci_score
+            : null;
+
+    const roiLatest = roiPct(latest);
+    const roiPrev = roiPct(prev);
+
+    const lines: string[] = [];
+    const tone: 'up' | 'down' | 'flat' = aleDelta < -1 ? 'down' : aleDelta > 1 ? 'up' : 'flat';
+    const aleCr = (v: number) => `₹${(v / 10000000).toFixed(2)} Cr`;
+
+    if (tone === 'down') {
+        lines.push(
+            `Expected Annual Loss fell ${Math.abs(aleDelta).toFixed(1)}% since the previous run (${aleCr(prev.expected_annual_loss)} → ${aleCr(latest.expected_annual_loss)}).`
+        );
+        if (turnedOn.length > 0) {
+            lines.push(`Likely driver: ${turnedOn.join(', ')} ${turnedOn.length === 1 ? 'was' : 'were'} turned on between these runs.`);
+        } else if (cciDelta !== null && cciDelta > 0.1) {
+            lines.push(
+                `No Strategic Control toggle changed, but the SEBI Withstand/CCI score rose ${cciDelta.toFixed(2)} pts - check the Training and Ingestion Engine pages for what improved Control Strength.`
+            );
+        } else {
+            lines.push(
+                'No Strategic Control toggle changed between these runs - most likely Monte Carlo sampling variance (each run resamples 10,000 iterations) rather than an actual change in risk posture.'
+            );
+        }
+    } else if (tone === 'up') {
+        lines.push(
+            `Expected Annual Loss rose ${aleDelta.toFixed(1)}% since the previous run (${aleCr(prev.expected_annual_loss)} → ${aleCr(latest.expected_annual_loss)}).`
+        );
+        if (turnedOff.length > 0) {
+            lines.push(`Likely driver: ${turnedOff.join(', ')} ${turnedOff.length === 1 ? 'was' : 'were'} turned off between these runs.`);
+        } else if (cciDelta !== null && cciDelta < -0.1) {
+            lines.push(
+                `No Strategic Control toggle changed, but the SEBI Withstand/CCI score dropped ${Math.abs(cciDelta).toFixed(2)} pts - check whether new Ingestion Engine control-gap findings were confirmed since the last run.`
+            );
+        } else {
+            lines.push(
+                'No Strategic Control toggle changed between these runs - most likely Monte Carlo sampling variance rather than an actual deterioration in risk posture.'
+            );
+        }
+    } else {
+        lines.push(`Expected Annual Loss is essentially flat since the previous run (${aleDelta >= 0 ? '+' : ''}${aleDelta.toFixed(1)}%).`);
+    }
+
+    if (varDelta !== null && Math.abs(varDelta) > 1 && Math.abs(aleDelta) > 1 && Math.sign(varDelta) !== Math.sign(aleDelta)) {
+        lines.push(
+            `Worth a closer look: the average loss (ALE) and the tail risk (VaR-95) moved in opposite directions (VaR-95 ${varDelta > 0 ? 'up' : 'down'} ${Math.abs(varDelta).toFixed(1)}%) - the shape of the loss distribution changed, not just its center. See the Loss Distribution chart on Overview.`
+        );
+    }
+
+    if (roiLatest !== null && roiPrev !== null && Math.abs(roiLatest - roiPrev) > 2) {
+        const roiDelta = roiLatest - roiPrev;
+        lines.push(
+            `Budget efficiency (ROI on the optimized control spend) ${roiDelta > 0 ? 'improved' : 'declined'} from ${roiPrev.toFixed(0)}% to ${roiLatest.toFixed(0)}%.`
+        );
+    }
+
+    return { tone, lines };
+}
+
 export default function ReportsPage() {
+    const { token } = useAuth();
+    const { showToast } = useToast();
+
     const [decisions, setDecisions] = useState<Decision[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    const [simulations, setSimulations] = useState<SimRun[]>([]);
+    const [isSimLoading, setIsSimLoading] = useState(true);
+    const [simError, setSimError] = useState<string | null>(null);
+
+    const [isSeeding, setIsSeeding] = useState(false);
+    const [seedProgress, setSeedProgress] = useState<{ current: number; total: number } | null>(null);
 
     const fetchSnapshot = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetch(`${API_BASE}/api/audit-log`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -66,38 +277,133 @@ export default function ReportsPage() {
         }
     }, []);
 
-    useEffect(() => {
+    const fetchSimulations = useCallback(async () => {
+        setIsSimLoading(true);
+        setSimError(null);
+        try {
+            const res = await fetchWithRetry(`${API_BASE}/api/simulations?limit=20`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            setSimulations(data.data || []);
+        } catch (e: any) {
+            console.error(e);
+            setSimError(e.message || 'Could not load the simulation analysis ledger. Is the backend running?');
+        } finally {
+            setIsSimLoading(false);
+        }
+    }, []);
+
+    const refreshAll = useCallback(() => {
         fetchSnapshot();
-    }, [fetchSnapshot]);
+        fetchSimulations();
+    }, [fetchSnapshot, fetchSimulations]);
+
+    // Fires each SEED_RUNS entry against the real /api/simulate-risk
+    // endpoint, one at a time (sequential, not Promise.all - both so the
+    // progress counter means something and so a mid-sequence failure
+    // stops cleanly instead of leaving a pile of unresolved requests).
+    // If the very first call 400s with "no assets found" - a fresh
+    // database that's never had /api/generate-mock-data run against it -
+    // this generates that mock telemetry once (requires being logged in,
+    // same as the button already on the Overview page) and retries that
+    // one run, rather than failing the whole sequence over a one-time
+    // setup step.
+    const seedDemoHistory = async () => {
+        setIsSeeding(true);
+        setSeedProgress({ current: 0, total: SEED_RUNS.length });
+        try {
+            for (let i = 0; i < SEED_RUNS.length; i++) {
+                setSeedProgress({ current: i + 1, total: SEED_RUNS.length });
+                const run = SEED_RUNS[i];
+                const res = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls }),
+                });
+                if (res.ok) continue;
+
+                const data = await res.json().catch(() => ({}));
+                const isNoAssets = res.status === 400 && /no assets/i.test(data.detail || '');
+                if (!(i === 0 && isNoAssets)) {
+                    throw new Error(data.detail || `Run ${i + 1} of ${SEED_RUNS.length} failed (${res.status})`);
+                }
+
+                // First run, and the database is empty - generate mock
+                // telemetry once, then retry this same run before moving on.
+                if (!token) {
+                    showToast('Log in as CISO or CFO (top-right) first - mock telemetry needs to be generated once before seeding demo runs.', 'error');
+                    return;
+                }
+                showToast('No mock telemetry yet - generating it once, then seeding...', 'info');
+                const genRes = await fetchWithRetry(`${API_BASE}/api/generate-mock-data`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!genRes.ok) {
+                    const genData = await genRes.json().catch(() => ({}));
+                    throw new Error(genData.detail || 'Could not generate mock telemetry.');
+                }
+                const retryRes = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls }),
+                });
+                if (!retryRes.ok) {
+                    const retryData = await retryRes.json().catch(() => ({}));
+                    throw new Error(retryData.detail || `Run 1 of ${SEED_RUNS.length} failed (${retryRes.status})`);
+                }
+            }
+            showToast(`Seeded ${SEED_RUNS.length} simulation runs across a range of budgets - refreshing the ledger.`, 'success');
+            await fetchSimulations();
+            await fetchSnapshot();
+        } catch (e: any) {
+            console.error(e);
+            showToast(e.message || 'Could not seed demo history. Is the backend running?', 'error');
+        } finally {
+            setIsSeeding(false);
+            setSeedProgress(null);
+        }
+    };
+
+    useEffect(() => {
+        refreshAll();
+    }, [refreshAll]);
 
     const totalRisk = decisions.reduce((sum, d) => sum + (d.risk_accepted || 0), 0);
     const approvedCount = decisions.filter((d) => d.board_approved).length;
     const onChainCount = decisions.filter((d) => d.on_chain).length;
 
+    const insights = buildInsights(simulations);
+    const chartData = [...simulations]
+        .reverse()
+        .map((r, idx) => ({ name: `Run ${idx + 1}`, ale: r.expected_annual_loss / 10000000, timestamp: r.timestamp }));
+
+    const isLoadingAny = isLoading || isSimLoading;
+
     return (
-        <div className="max-w-[1000px] mx-auto flex flex-col gap-stack-lg">
-            <div className="flex justify-between items-end">
+        <div className="max-w-[1100px] mx-auto flex flex-col gap-stack-lg">
+            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
                 <div>
                     <h1 className="font-headline-md text-headline-md text-primary mb-1">Reports</h1>
                     <p className="font-body-md text-body-md text-on-surface-variant">
-                        Board-ready risk reporting and regulatory framework mappings, generated from live telemetry and the audit ledger.
+                        Board-ready risk figures and a run-over-run simulation ledger, computed live from the audit trail and every persisted simulation.
                     </p>
                 </div>
                 <button
-                    onClick={fetchSnapshot}
-                    disabled={isLoading}
-                    className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60"
+                    onClick={refreshAll}
+                    disabled={isLoadingAny}
+                    className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
                 >
-                    <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
+                    <span className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
                     Refresh
                 </button>
             </div>
 
-            {/* Board Report Snapshot */}
+            {/* Board Approval Basis */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
-                <h3 className="font-title-lg text-title-lg text-primary mb-1">Board Report Snapshot</h3>
+                <h3 className="font-title-lg text-title-lg text-primary mb-1">Board Approval Basis</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
-                    Cumulative risk-acceptance activity to date, suitable for audit-committee reporting.
+                    RBI requires explicit board or audit-committee sign-off (<code className="font-data-mono text-data-mono">board_approved</code>) on every risk-acceptance decision above materiality. This is that sign-off record, live from the audit ledger.
                 </p>
                 {error ? (
                     <p className="font-body-sm text-body-sm text-error">{error}</p>
@@ -139,10 +445,225 @@ export default function ReportsPage() {
                 </a>
             </div>
 
+            {/* Simulation Analysis Ledger */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-stack-sm mb-stack-md">
+                    <div>
+                        <h3 className="font-title-lg text-title-lg text-primary mb-1">Simulation Analysis Ledger</h3>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">
+                            Every FAIR Monte Carlo run ever computed on Overview, most recent first - budget, ALE, VaR, ROI, and which Strategic Controls were active for that run.
+                        </p>
+                    </div>
+                    {simulations.length < 3 && (
+                        <button
+                            onClick={seedDemoHistory}
+                            disabled={isSeeding}
+                            title="Runs 6 real simulations at a range of budgets and control combinations, so the chart and insights below have something real to show"
+                            className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-3 py-1.5 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap shrink-0"
+                        >
+                            {isSeeding ? (
+                                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                            ) : (
+                                <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+                            )}
+                            {isSeeding && seedProgress ? `Seeding ${seedProgress.current}/${seedProgress.total}...` : 'Seed Demo Runs'}
+                        </button>
+                    )}
+                </div>
+
+                {isSimLoading ? (
+                    <div className="flex flex-col gap-stack-sm">
+                        <div className="h-[180px] w-full bg-surface-variant/30 rounded animate-pulse" />
+                        <div className="h-16 w-full bg-surface-variant/20 rounded animate-pulse" />
+                        {[...Array(3)].map((_, i) => (
+                            <div key={i} className="h-10 bg-surface-container-low rounded animate-pulse" />
+                        ))}
+                    </div>
+                ) : simError ? (
+                    <p className="font-body-sm text-body-sm text-error">{simError}</p>
+                ) : simulations.length === 0 ? (
+                    <p className="font-body-sm text-body-sm text-on-surface-variant">
+                        No simulations run yet - click &quot;Run Simulation&quot; on the Overview page to populate this ledger.
+                    </p>
+                ) : (
+                    <>
+                        {/* ALE trend chart */}
+                        <div className="w-full bg-surface-container-low rounded border border-outline-variant border-dashed mb-stack-md" style={{ height: 180 }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={chartData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--outline-variant)" />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--on-surface-variant)' }} />
+                                    <YAxis tick={{ fontSize: 11, fill: 'var(--on-surface-variant)' }} tickFormatter={(v) => `₹${v.toFixed(1)}Cr`} width={64} />
+                                    <Tooltip formatter={(value: any) => [`₹${Number(value).toFixed(2)} Cr`, 'Expected Annual Loss']} />
+                                    <Line type="monotone" dataKey="ale" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        {/* Insights */}
+                        {insights ? (
+                            <div
+                                className={`rounded-lg p-stack-md mb-stack-md border flex gap-stack-sm items-start ${
+                                    insights.tone === 'down'
+                                        ? 'border-[#15803d]/30 bg-[#15803d]/10'
+                                        : insights.tone === 'up'
+                                            ? 'border-error/30 bg-error/10'
+                                            : 'border-outline-variant bg-surface-container-low'
+                                }`}
+                            >
+                                <span
+                                    className={`material-symbols-outlined text-[20px] mt-0.5 ${
+                                        insights.tone === 'down' ? 'text-[#15803d]' : insights.tone === 'up' ? 'text-error' : 'text-on-surface-variant'
+                                    }`}
+                                >
+                                    {insights.tone === 'down' ? 'trending_down' : insights.tone === 'up' ? 'trending_up' : 'trending_flat'}
+                                </span>
+                                <div className="flex flex-col gap-1">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">Run-over-run analysis</span>
+                                    {insights.lines.map((line, i) => (
+                                        <p key={i} className="font-body-sm text-body-sm">
+                                            {line}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="rounded-lg p-stack-md mb-stack-md border border-outline-variant bg-surface-container-low flex gap-stack-sm items-start">
+                                <span className="material-symbols-outlined text-[20px] text-on-surface-variant mt-0.5">info</span>
+                                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                                    Run at least two simulations from Overview to see trend analysis and suggestions here.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Table */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-surface-container-low border-b border-outline-variant">
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">#</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Date</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Budget</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">ALE</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">VaR-95</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">ROI</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">SEBI CCI</th>
+                                        <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Active Controls</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {simulations.map((r, idx) => {
+                                        const controls = activeControlNames(r);
+                                        const roi = roiPct(r);
+                                        return (
+                                            <tr key={r.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
+                                                <td className="py-3 px-4 font-data-mono text-data-mono text-on-surface-variant">#{simulations.length - idx}</td>
+                                                <td className="py-3 px-4 font-body-sm text-body-sm text-on-surface-variant whitespace-nowrap">
+                                                    {new Date(r.timestamp).toLocaleString()}
+                                                </td>
+                                                <td className="py-3 px-4 font-data-mono text-data-mono">
+                                                    {r.budget_used != null ? `₹${(r.budget_used / 10000000).toFixed(2)} Cr` : '—'}
+                                                </td>
+                                                <td className="py-3 px-4 font-data-mono text-data-mono font-bold">
+                                                    ₹{(r.expected_annual_loss / 10000000).toFixed(2)} Cr
+                                                </td>
+                                                <td className="py-3 px-4 font-data-mono text-data-mono">
+                                                    {r.var_95 != null ? `₹${(r.var_95 / 10000000).toFixed(2)} Cr` : '—'}
+                                                </td>
+                                                <td className="py-3 px-4 font-data-mono text-data-mono">
+                                                    {roi != null ? (
+                                                        <span className={roi >= 0 ? 'text-[#15803d]' : 'text-error'}>{roi.toFixed(0)}%</span>
+                                                    ) : (
+                                                        '—'
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-4 font-data-mono text-data-mono">
+                                                    {r.sebi_resilience?.cci_score != null ? r.sebi_resilience.cci_score.toFixed(1) + '/5' : '—'}
+                                                </td>
+                                                <td className="py-3 px-4 font-body-sm text-body-sm text-on-surface-variant" title={controls.join(', ') || 'None'}>
+                                                    {controls.length > 0 ? `${controls.length} active` : 'None'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Framework Coverage Matrix */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <h3 className="font-title-lg text-title-lg text-primary mb-1">Framework Coverage Matrix</h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
+                    Every Strategic Control mapped to the NIST CSF function, ISO/IEC 27001:2022 Annex A control, and CIS Controls v8 Safeguard it satisfies - live from the most recent simulation&apos;s active_controls, not a static reference table.
+                </p>
+                {isSimLoading ? (
+                    <div className="flex flex-col gap-2">
+                        {[...Array(4)].map((_, i) => (
+                            <div key={i} className="h-10 bg-surface-container-low rounded animate-pulse" />
+                        ))}
+                    </div>
+                ) : simulations.length === 0 || !simulations[0]?.framework_coverage || simulations[0].framework_coverage.length === 0 ? (
+                    <p className="font-body-sm text-body-sm text-on-surface-variant">
+                        Run at least one simulation from Overview to populate this matrix against your real control posture.
+                    </p>
+                ) : (
+                    (() => {
+                        const coverage = simulations[0].framework_coverage!;
+                        const activeCount = coverage.filter((r) => r.active).length;
+                        return (
+                            <>
+                                <div className="flex flex-wrap items-center gap-2 mb-stack-md">
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                                        {activeCount} / {coverage.length} controls active
+                                    </span>
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                                        As of run #{simulations.length} - {new Date(simulations[0].timestamp).toLocaleString()}
+                                    </span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-surface-container-low border-b border-outline-variant">
+                                                <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Status</th>
+                                                <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Strategic Control</th>
+                                                <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">NIST CSF</th>
+                                                <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">ISO/IEC 27001:2022</th>
+                                                <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">CIS Controls v8</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {coverage.map((row) => (
+                                                <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
+                                                    <td className="py-3 px-4">
+                                                        <span className={`font-label-caps text-label-caps px-2 py-0.5 rounded ${row.active ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-surface-container text-on-surface-variant'}`}>
+                                                            {row.active ? 'Active' : 'Not active'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4 font-body-sm text-body-sm font-medium whitespace-nowrap">{row.id}</td>
+                                                    <td className="py-3 px-4 font-data-mono text-data-mono text-on-surface-variant whitespace-nowrap">{row.nist_csf}</td>
+                                                    <td className="py-3 px-4 font-body-sm text-body-sm text-on-surface-variant">{row.iso27001}</td>
+                                                    <td className="py-3 px-4 font-body-sm text-body-sm text-on-surface-variant">{row.cis_controls}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p className="font-body-sm text-body-sm text-on-surface-variant mt-stack-md">
+                                    Each control is mapped to its single most representative clause per framework, not an exhaustive citation list - see <a href="/docs#compliance-frameworks" className="text-primary hover:underline">Docs</a> for the full methodology.
+                                </p>
+                            </>
+                        );
+                    })()
+                )}
+            </div>
+
             {/* Report Library */}
             <div>
                 <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Regulatory Report Library</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
                     {REPORT_LIBRARY.map((report, i) => (
                         <div key={i} className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col gap-stack-sm">
                             <div className="flex items-center gap-stack-sm">
@@ -151,10 +672,12 @@ export default function ReportsPage() {
                             </div>
                             <div className="font-body-sm text-body-sm font-semibold">{report.title}</div>
                             <p className="font-body-sm text-body-sm text-on-surface-variant">{report.body}</p>
-                            <p className="font-data-mono text-data-mono text-on-surface-variant/80 mt-auto pt-stack-sm">{report.source}</p>
                         </div>
                     ))}
                 </div>
+                <a href="/docs#compliance-frameworks" className="inline-block mt-stack-md font-body-sm text-body-sm text-primary hover:underline">
+                    Full computation methodology for all six frameworks &rarr;
+                </a>
             </div>
 
             {/* Note on generation */}
@@ -162,7 +685,7 @@ export default function ReportsPage() {
                 <div className="flex gap-stack-sm items-start">
                     <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
                     <p className="font-body-sm text-body-sm text-on-surface-variant">
-                        These reports are computed on demand from live telemetry and simulation output rather than static exports - run a simulation on the Overview page or accept a risk to refresh the underlying numbers, then hit Refresh above.
+                        Every number on this page is computed on demand from live telemetry, the audit ledger, and persisted simulation runs - nothing here is a static export. Run a simulation on Overview or accept a risk, then hit Refresh above.
                     </p>
                 </div>
             </div>

@@ -25,7 +25,7 @@ def optimize_budget(budget: float) -> str:
     own fictional, dollar-scale patch list that never matched what the app actually showed for
     the same budget.
     """
-    opt_results = quant_opt.optimize_budget(risk_engine.DUMMY_PATCHES, budget)
+    opt_results = quant_opt.optimize_budget(risk_engine.SECURITY_CONTROLS, budget)
     return f"Optimized budget for ₹{budget:,.0f}: {opt_results}"
 
 
@@ -34,25 +34,45 @@ def run_monte_carlo_var(is_dpdp_applicable: Optional[bool] = None) -> str:
     """
     Triggers the FAIR Monte Carlo Engine to generate Value at Risk (VaR) distribution curves,
     using the SAME live telemetry-derived inputs as the dashboard's Overview page (blast-radius
-    vulnerability, control-strength deductions, contextual DPDP trigger) - not a fixed made-up
-    range. Pass is_dpdp_applicable to override the automatic DPDP trigger; leave it unset to use
-    whatever the live telemetry actually implies.
+    vulnerability, control-strength deductions, contextual DPDP trigger, and - see
+    risk_engine.compute_calibration - the Closed-Loop Calibration Engine's Bayesian-updated
+    control effectiveness and loss-variance widening from real logged incidents) - not a fixed
+    made-up range. Pass is_dpdp_applicable to override the automatic DPDP trigger; leave it unset
+    to use whatever the live telemetry actually implies.
     """
     db = SessionLocal()
     try:
-        inputs = risk_engine.derive_fair_inputs(db, dpdp_override=is_dpdp_applicable)
+        calibration = risk_engine.get_current_calibration(db)
+        inputs = risk_engine.derive_fair_inputs(db, dpdp_override=is_dpdp_applicable, calibration=calibration)
     finally:
         db.close()
 
     if inputs is None:
         return "No assets found in the database yet - run mock data generation first (POST /api/generate-mock-data)."
 
+    # derive_fair_inputs() now also returns "risk_drivers" (the Explainable
+    # Risk Attribution waterfall) and "calibration" (the Closed-Loop
+    # Calibration Engine's state - see risk_engine.py) keys that
+    # run_fair_monte_carlo doesn't accept as keyword arguments; drop both
+    # before spreading the rest of the dict in - see the identical
+    # risk_drivers pop in backend/main.py::simulate_risk for why this is
+    # non-negotiable (run_fair_monte_carlo has a fixed parameter list with
+    # no **kwargs catch-all, so a stray key breaks every single call).
+    inputs.pop("risk_drivers", None)
+    inputs.pop("calibration", None)
     mc_results = quant_mc.run_fair_monte_carlo(**inputs)
     sebi = mc_results.get("sebi_resilience", {})
+    uncertainty_note = ""
+    if calibration.get("incident_count", 0) > 0:
+        uncertainty_note = (
+            f" (calibrated against {calibration['incident_count']} logged incident"
+            f"{'s' if calibration['incident_count'] != 1 else ''}, model uncertainty "
+            f"{calibration.get('uncertainty_score', 100.0):.0f}/100)"
+        )
     return (
         f"Monte Carlo Results (live telemetry): Mean Expected Loss = ₹{mc_results['mean_expected_loss']:,.0f}, "
         f"95th Percentile VaR = ₹{mc_results['var_95']:,.0f}, "
-        f"SEBI Cyber Capability Index = {sebi.get('cci_score', 0):.2f}/5"
+        f"SEBI Cyber Capability Index = {sebi.get('cci_score', 0):.2f}/5{uncertainty_note}"
     )
 
 

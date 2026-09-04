@@ -1,11 +1,7 @@
-fastapi
-uvicorn
-sqlalchemy
-sqlmodel
-psycopg2-binary
-pydantic
-PyJWT
-Faker
-python-multipart
-web3
-python-dotenv
+# This used to be a short, hand-written, unpinned subset of the real
+# dependency list and had drifted out of sync with it (e.g. was missing
+# slowapi). The actual source of truth is the repo root's requirements.txt
+# - that's what render.yaml deploys from and what CI installs. Point here
+# instead of duplicating it, so `pip install -r backend/requirements.txt`
+# still works if you run it from inside backend/.
+-r ../requirements.txt

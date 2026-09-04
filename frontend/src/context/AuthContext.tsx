@@ -1,6 +1,7 @@
 "use client";
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/api';
+import { useToast } from './ToastContext';
 
 // Minimal auth context so any page/component (e.g. the Accept Risk button)
 // can grab a bearer token to call protected backend endpoints like
@@ -21,6 +22,7 @@ interface AuthContextValue {
     loginAs: (role: DemoRole) => Promise<void>;
     logout: () => void;
     loginError: string | null;
+    loggingInRole: DemoRole | null;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -29,6 +31,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [token, setToken] = useState<string | null>(null);
     const [username, setUsername] = useState<string | null>(null);
     const [loginError, setLoginError] = useState<string | null>(null);
+    const [loggingInRole, setLoggingInRole] = useState<DemoRole | null>(null);
+    const { showToast } = useToast();
 
     useEffect(() => {
         const savedToken = localStorage.getItem('crq_token');
@@ -41,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const loginAs = async (role: DemoRole) => {
         setLoginError(null);
+        setLoggingInRole(role);
         const creds = DEMO_CREDENTIALS[role];
         try {
             const body = new URLSearchParams();
@@ -63,21 +68,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUsername(creds.username);
             localStorage.setItem('crq_token', data.access_token);
             localStorage.setItem('crq_user', creds.username);
+            showToast(`Logged in as ${creds.username.toUpperCase()}.`, 'success');
         } catch (e: any) {
             console.error('Login error:', e);
-            setLoginError('Could not log in. Is the backend running on port 8000?');
+            const message = 'Could not log in. Is the backend running on port 8000?';
+            setLoginError(message);
+            showToast(message, 'error');
+        } finally {
+            setLoggingInRole(null);
         }
     };
 
     const logout = () => {
         setToken(null);
         setUsername(null);
+        setLoginError(null);
         localStorage.removeItem('crq_token');
         localStorage.removeItem('crq_user');
+        showToast('Logged out.', 'info');
     };
 
     return (
-        <AuthContext.Provider value={{ token, username, loginAs, logout, loginError }}>
+        <AuthContext.Provider value={{ token, username, loginAs, logout, loginError, loggingInRole }}>
             {children}
         </AuthContext.Provider>
     );

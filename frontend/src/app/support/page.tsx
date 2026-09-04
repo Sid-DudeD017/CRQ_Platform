@@ -34,7 +34,7 @@ export default function SupportPage() {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                 <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Demo Credentials</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
-                    Used by the "Login as..." buttons in the top navigation. Fixed demo accounts only - see backend/security.py.
+                    Used by the &quot;Login as...&quot; buttons in the top navigation. Fixed demo accounts only - see backend/security.py.
                 </p>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">

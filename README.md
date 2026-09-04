@@ -6,6 +6,19 @@ An AI-Powered Cyber Risk Quantification (CRQ) Platform that bridges enterprise t
 
 The platform operates as a centralized hub, routing data through a FastAPI backend before feeding it into mathematical and AI models:
 
+```mermaid
+flowchart LR
+    User(["Executive / CISO / CFO"]) --> FE["Frontend\nNext.js 14 dashboard"]
+    FE -->|"HTTP (NEXT_PUBLIC_API_URL)"| BE["Backend Gateway\nFastAPI + SQLModel"]
+
+    BE --> QE["Quant Engine\nFAIR Monte Carlo + Knapsack optimizer"]
+    BE --> AI["AI Agent\nLangGraph + Groq + ChromaDB RAG"]
+    BE --> DB[("Database\nPostgres (Neon) / SQLite")]
+    BE -->|"Accept Risk"| BC["Blockchain Audit Trail\nAuditLedger.sol on Hardhat"]
+
+    AI -.->|RAG| DOCS[("Compliance docs\nNIST / RBI / SEBI / DPDP")]
+```
+
 - **Frontend (`/frontend`)**: Next.js 14 executive dashboard featuring real-time Recharts for Monte Carlo distributions, budget optimization sliders, and a built-in AI Chat panel.
 - **Backend API (`/backend`)**: FastAPI server acting as the gateway. It manages SQLite/PostgreSQL databases, handles mock telemetry generation, and serves endpoints for the frontend. `POST /api/audit` (the "Accept Risk" → blockchain trigger) now requires a JWT — see the testing section below.
 - **Quant Engine (`/quant-engine`)**: Calculates Annualized Loss Expectancy (ALE) and Value at Risk (VaR) using FAIR Monte Carlo simulations. It also uses a Knapsack optimizer to recommend budget allocations.
@@ -19,7 +32,7 @@ The platform operates as a centralized hub, routing data through a FastAPI backe
 ### Prerequisites
 - Node.js (v18+)
 - Python (v3.10+)
-- An OpenAI API Key (Required for the Virtual CISO agent)
+- A Groq API key (free, get one at https://console.groq.com/keys) for the Virtual CISO agent - set `GROQ_API_KEY` in `ai-agent/.env`. An `OPENAI_API_KEY` also works as a fallback if `GROQ_API_KEY` isn't set (see `ai-agent/graph.py`), but costs money.
 
 ### 1. Backend Setup
 
@@ -108,5 +121,3 @@ Once the platform is running, follow these steps to test the full data pipeline:
      -H "Content-Type: application/json" \
      -d '{"action": "accept_risk", "risk_accepted": 50000}'
    ```
-
-   **Frontend TODO:** the "Accept Risk" button needs to call `/api/auth/login` (once, e.g. on page load with a hardcoded demo account for now) and attach the resulting token as an `Authorization: Bearer <token>` header on its `/api/audit` call, or that button will start returning `401 Unauthorized`.

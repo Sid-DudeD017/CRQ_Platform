@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { API_BASE } from '@/lib/api';
+import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 
 interface Decision {
     id: number;
@@ -19,16 +21,21 @@ function truncateHash(hash: string) {
 }
 
 export default function LedgerPage() {
+    const { token } = useAuth();
+    const { showToast } = useToast();
     const [decisions, setDecisions] = useState<Decision[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [copiedId, setCopiedId] = useState<number | null>(null);
+    const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+    const [isClearing, setIsClearing] = useState(false);
+    const [clearError, setClearError] = useState<string | null>(null);
 
     const fetchLedger = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetch(`${API_BASE}/api/audit-log`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -42,7 +49,51 @@ export default function LedgerPage() {
 
     useEffect(() => {
         fetchLedger();
+
+        // Defense in depth against the Next.js Router Cache serving a
+        // stale snapshot of this page after navigating away and back (e.g.
+        // right after logging a decision from Overview) - also covers
+        // switching back to this tab from another one.
+        const onFocus = () => fetchLedger();
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') fetchLedger();
+        };
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
     }, [fetchLedger]);
+
+    const clearLedger = async () => {
+        setClearError(null);
+        if (!token) {
+            const message = 'You need to be logged in as CISO or CFO (top-right corner) to clear the ledger.';
+            setClearError(message);
+            showToast(message, 'error');
+            return;
+        }
+        setIsClearing(true);
+        try {
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            setDecisions([]);
+            setIsClearModalOpen(false);
+            showToast(`Cleared ${data.deleted} decision${data.deleted === 1 ? '' : 's'} - the ledger is back to 0.`, 'success');
+        } catch (e: any) {
+            console.error(e);
+            const message = e.message || 'Could not clear the ledger. Is the backend running on port 8000?';
+            setClearError(message);
+            showToast(message, 'error');
+        } finally {
+            setIsClearing(false);
+        }
+    };
 
     const copyHash = (id: number, hash: string) => {
         navigator.clipboard?.writeText(hash).catch(() => {});
@@ -55,21 +106,37 @@ export default function LedgerPage() {
 
     return (
         <div className="max-w-[1100px] mx-auto flex flex-col gap-stack-lg">
-            <div className="flex justify-between items-end">
+            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
                 <div>
                     <h1 className="font-headline-md text-headline-md text-primary mb-1">Detailed Ledger</h1>
                     <p className="font-body-md text-body-md text-on-surface-variant">
                         Every risk-acceptance decision, persisted to the database and committed to the on-chain audit trail where available.
                     </p>
                 </div>
-                <button
-                    onClick={fetchLedger}
-                    disabled={isLoading}
-                    className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60"
-                >
-                    <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
-                    Refresh
-                </button>
+                <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                            onClick={fetchLedger}
+                            disabled={isLoading}
+                            className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
+                        >
+                            <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
+                            Refresh
+                        </button>
+                        <button
+                            onClick={() => { setClearError(null); setIsClearModalOpen(true); }}
+                            disabled={isLoading || decisions.length === 0 || !token}
+                            title={!token ? 'Log in first (top-right corner) to clear the ledger' : 'Delete every logged decision and reset to 0'}
+                            className="border border-outline-variant text-error bg-surface hover:bg-error/10 hover:border-error px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-40 disabled:hover:bg-surface disabled:hover:border-outline-variant whitespace-nowrap"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                            Clear Ledger
+                        </button>
+                    </div>
+                    {!token && decisions.length > 0 && (
+                        <span className="font-label-caps text-label-caps text-on-surface-variant">Log in (top-right) to enable Clear Ledger</span>
+                    )}
+                </div>
             </div>
 
             {/* Summary stats */}
@@ -103,7 +170,7 @@ export default function LedgerPage() {
                 ) : decisions.length === 0 ? (
                     <div className="p-gutter text-center">
                         <span className="material-symbols-outlined text-[40px] text-outline mb-2">receipt_long</span>
-                        <p className="font-body-sm text-body-sm text-on-surface-variant">No risk decisions logged yet - click "Accept Risk" on the Overview page to create one.</p>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">No risk decisions logged yet - click &quot;Accept Risk&quot; on the Overview page to create one.</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -158,6 +225,48 @@ export default function LedgerPage() {
             <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
+
+            {isClearModalOpen && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => !isClearing && setIsClearModalOpen(false)}>
+                    <div
+                        className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter w-full max-w-md shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start gap-stack-sm mb-stack-md">
+                            <span className="material-symbols-outlined text-error text-[28px]">warning</span>
+                            <div>
+                                <h3 className="font-title-lg text-title-lg text-primary">Clear the entire ledger?</h3>
+                                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                                    This permanently deletes all {decisions.length} logged decision{decisions.length === 1 ? '' : 's'} (database and on-chain status alike) and resets Total Decisions and Committed On-Chain back to 0. This cannot be undone.
+                                </p>
+                                {clearError && (
+                                    <p className="font-body-sm text-body-sm text-error mt-stack-sm flex items-start gap-1">
+                                        <span className="material-symbols-outlined text-[16px] mt-0.5">error</span>
+                                        {clearError}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-stack-sm">
+                            <button
+                                onClick={() => { setIsClearModalOpen(false); setClearError(null); }}
+                                disabled={isClearing}
+                                className="px-4 py-2 border border-outline-variant text-on-surface rounded font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={clearLedger}
+                                disabled={isClearing}
+                                className="px-4 py-2 bg-error text-on-error rounded font-body-sm text-body-sm font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-60 flex items-center gap-2"
+                            >
+                                {isClearing && <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
+                                {isClearing ? 'Clearing...' : 'Clear Ledger'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

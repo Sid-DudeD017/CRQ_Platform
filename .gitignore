@@ -39,3 +39,6 @@ ai-agent/chroma_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Stray tool-session artifact occasionally dropped in repo root
+:memory:.ses
