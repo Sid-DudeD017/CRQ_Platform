@@ -32,10 +32,19 @@ env/
 
 # Database
 *.sqlite3
+*.db
 crq_db.sqlite3
+crq_platform.db
 
 # Vector DB
 ai-agent/chroma_data/
+
+# Logs (uvicorn.log, frontend/dev.log, npm-debug.log* already covered above)
+*.log
+
+# Stray local test/auth output (e.g. `curl -o login.json` while testing
+# auth locally) - never intentionally produced by the app itself
+login.json
 
 # OS
 .DS_Store

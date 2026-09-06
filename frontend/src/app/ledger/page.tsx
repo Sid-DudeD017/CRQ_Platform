@@ -31,6 +31,15 @@ export default function LedgerPage() {
     const [isClearModalOpen, setIsClearModalOpen] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
     const [clearError, setClearError] = useState<string | null>(null);
+
+    // Judge-day "reset everything" - see backend/main.py::reset_demo. Kept
+    // separate from isClearModalOpen/isClearing above since this is a much
+    // bigger blast radius (every dashboard's ledger, calibration/training
+    // history, and ingestion mappings, not just this one ledger) and needs
+    // its own confirm copy so nobody mistakes it for "Clear Ledger".
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
+    const [resetError, setResetError] = useState<string | null>(null);
     const [committingId, setCommittingId] = useState<number | null>(null);
 
     // [Separate ledgers per dashboard] Demo (Overview) and Own Data
@@ -120,6 +129,36 @@ export default function LedgerPage() {
         }
     };
 
+    const resetDemo = async () => {
+        setResetError(null);
+        if (!token) {
+            const message = 'You need to be logged in as CISO or CFO (top-right corner) to reset the demo.';
+            setResetError(message);
+            showToast(message, 'error');
+            return;
+        }
+        setIsResetting(true);
+        try {
+            const res = await fetchWithRetry(`${API_BASE}/api/reset-demo`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            setDecisions([]);
+            setIsResetModalOpen(false);
+            showToast('Demo reset to pristine state - fresh demo and own-data fleets regenerated.', 'success');
+            fetchLedger();
+        } catch (e: any) {
+            console.error(e);
+            const message = e.message || 'Could not reset the demo. Is the backend running on port 8000?';
+            setResetError(message);
+            showToast(message, 'error');
+        } finally {
+            setIsResetting(false);
+        }
+    };
+
     const copyHash = (id: number, hash: string) => {
         navigator.clipboard?.writeText(hash).catch(() => {});
         setCopiedId(id);
@@ -191,6 +230,15 @@ export default function LedgerPage() {
                         >
                             <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
                             Clear Ledger
+                        </button>
+                        <button
+                            onClick={() => { setResetError(null); setIsResetModalOpen(true); }}
+                            disabled={isLoading || !token}
+                            title={!token ? 'Log in first (top-right corner) to reset the demo' : 'Reset every dashboard back to a pristine, freshly-seeded state'}
+                            className="border border-outline-variant text-error bg-surface hover:bg-error/10 hover:border-error px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-40 disabled:hover:bg-surface disabled:hover:border-outline-variant whitespace-nowrap"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+                            Reset Full Demo
                         </button>
                     </div>
                     {!token && decisions.length > 0 && (
@@ -339,6 +387,52 @@ export default function LedgerPage() {
                             >
                                 {isClearing && <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
                                 {isClearing ? 'Clearing...' : 'Clear Ledger'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isResetModalOpen && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => !isResetting && setIsResetModalOpen(false)}>
+                    <div
+                        className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter w-full max-w-md shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start gap-stack-sm mb-stack-md">
+                            <span className="material-symbols-outlined text-error text-[28px]">warning</span>
+                            <div>
+                                <h3 className="font-title-lg text-title-lg text-primary">Reset the entire demo?</h3>
+                                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                                    This permanently clears BOTH dashboards' audit ledgers and run history, every logged
+                                    incident and calibration trend, all training completions, and every confirmed
+                                    Ingestion Engine mapping - then regenerates a fresh demo fleet and a fresh own-data
+                                    starter fleet. Use this between separate demo sessions so the next one starts from
+                                    a clean slate. This cannot be undone.
+                                </p>
+                                {resetError && (
+                                    <p className="font-body-sm text-body-sm text-error mt-stack-sm flex items-start gap-1">
+                                        <span className="material-symbols-outlined text-[16px] mt-0.5">error</span>
+                                        {resetError}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-stack-sm">
+                            <button
+                                onClick={() => { setIsResetModalOpen(false); setResetError(null); }}
+                                disabled={isResetting}
+                                className="px-4 py-2 border border-outline-variant text-on-surface rounded font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-60"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={resetDemo}
+                                disabled={isResetting}
+                                className="px-4 py-2 bg-error text-on-error rounded font-body-sm text-body-sm font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-60 flex items-center gap-2"
+                            >
+                                {isResetting && <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
+                                {isResetting ? 'Resetting...' : 'Reset Full Demo'}
                             </button>
                         </div>
                     </div>

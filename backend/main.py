@@ -84,6 +84,14 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     context: Optional[Dict[str, Any]] = None
+    # Which dashboard the user was chatting from - "predefined" (demo
+    # fleet) or "own" (their ingested data). Previously the chat pipeline
+    # never asked for this at all, so the Virtual CISO's tools (see
+    # ai-agent/tools.py) always queried the demo fleet's data regardless of
+    # which dashboard the question came from - a user on the Own Data /
+    # Ingestion dashboard asking the AI about their own risk would silently
+    # get demo numbers back.
+    data_source: str = "predefined"
 
 
 class RiskSimRequest(BaseModel):
@@ -817,7 +825,17 @@ async def chat(request: Request, payload: ChatRequest, current_user: str = Depen
     async def event_stream():
         has_yielded = False
         try:
-            async for event in ai_graph.app.astream_events(initial_state, version="v1"):
+            async for event in ai_graph.app.astream_events(
+                initial_state, version="v1",
+                # Hands data_source to every node/sub-agent/tool in this run
+                # via RunnableConfig's "configurable" bag - see
+                # ai-agent/graph.py's specialist nodes and
+                # tools.py::_data_source_from_config for the rest of the
+                # chain. This is standard LangChain config propagation, not
+                # part of the LLM-visible message, so the model can't see or
+                # override it.
+                config={"configurable": {"data_source": payload.data_source}},
+            ):
                 kind = event["event"]
                 data = event.get("data") or {}
                 if kind == "on_chat_model_stream":
@@ -1008,3 +1026,89 @@ def clear_audit_log(
         db.delete(decision)
     db.commit()
     return {"status": "success", "deleted": count}
+
+
+@app.post("/api/reset-demo")
+def reset_demo(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Judge-day utility: wipes every piece of session state that can drift or
+    accumulate between separate demo runs on the same live instance -
+    audit ledger decisions, run history, logged incidents and their
+    calibration trend, training completions, and confirmed Ingestion
+    Engine mappings - then regenerates a fresh demo fleet and a fresh
+    'own'-data starter fleet, so the next person to open the app gets the
+    exact same pristine state as a first run.
+
+    Previously the only reset available was DELETE /api/audit-log (just
+    the ledger). Everything else kept accumulating across judges/rounds on
+    a shared running instance: a widened calibration confidence band from
+    someone's earlier "log incident" test, training modules already marked
+    100% complete, ingestion mappings from a previous walkthrough - none
+    of which resets itself, so the platform could look already-used
+    instead of freshly demoable.
+
+    Deliberately unscoped (no ?data_source= filter, unlike /api/audit-log)
+    - this is the "start completely over" button, not a partial clear.
+    Requires a valid bearer token, same as the other demo-data endpoints,
+    since it's fully destructive and irreversible.
+
+    Delete order matters here: CalibrationSnapshot.incident_id is a
+    foreign key into IncidentRecord, and TelemetryLog.asset_id into Asset,
+    so children are deleted before the parents they reference.
+    """
+    counts: Dict[str, int] = {}
+
+    def _delete_all(model) -> int:
+        rows = db.exec(select(model)).all()
+        for row in rows:
+            db.delete(row)
+        return len(rows)
+
+    # Calibration trend + its source-of-truth incident history (see
+    # risk_engine.compute_calibration's docstring: CalibrationSnapshot is
+    # just a ledger, IncidentRecord is what calibration is actually
+    # computed from - clearing one without the other would leave the next
+    # simulation still calibrated against "cleared" incidents).
+    counts["calibration_snapshots"] = _delete_all(models.CalibrationSnapshot)
+    counts["incident_records"] = _delete_all(models.IncidentRecord)
+
+    # Audit ledger + run history, both dashboards, no data_source filter.
+    counts["risk_decisions"] = _delete_all(models.RiskDecision)
+    counts["risk_simulations"] = _delete_all(models.RiskSimulation)
+
+    # Training completions and confirmed Ingestion Engine mappings.
+    counts["training_records"] = _delete_all(models.TrainingRecord)
+    counts["ingested_mappings"] = _delete_all(models.IngestedMapping)
+
+    # 'own'-data Asset/TelemetryLog rows - predefined-side rows are handled
+    # by generators.populate_database below, which already scopes itself
+    # to 'predefined' (see that function's docstring) and must never touch
+    # 'own' rows itself, so they're cleared here instead. TelemetryLog
+    # before Asset for the same foreign-key reason as above.
+    own_assets = db.exec(select(models.Asset).where(models.Asset.data_source == "own")).all()
+    own_asset_ids = [a.id for a in own_assets]
+    own_logs = db.exec(
+        select(models.TelemetryLog).where(models.TelemetryLog.asset_id.in_(own_asset_ids))
+    ).all() if own_asset_ids else []
+    for log in own_logs:
+        db.delete(log)
+    for asset in own_assets:
+        db.delete(asset)
+    counts["own_assets"] = len(own_assets)
+    counts["own_telemetry_logs"] = len(own_logs)
+
+    db.commit()
+
+    # Regenerate both fleets fresh so the app isn't left empty right after
+    # a reset - populate_database wipes+reseeds the demo ('predefined')
+    # side itself; ensure_own_data_baseline seeds the same starter fleet
+    # POST /api/ingest normally lazy-seeds on first use.
+    success, message = generators.populate_database(db)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Reset cleared old state but demo reseed failed: {message}")
+    generators.ensure_own_data_baseline(db)
+
+    return {"status": "success", "cleared": counts, "message": "Demo state reset to pristine - fresh demo and own-data fleets regenerated."}

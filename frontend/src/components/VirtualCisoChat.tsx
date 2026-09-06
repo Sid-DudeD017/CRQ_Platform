@@ -5,7 +5,7 @@ import { API_BASE } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 export default function VirtualCisoChat() {
-    const { token } = useAuth();
+    const { token, username } = useAuth();
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
     const [chatInput, setChatInput] = useState('');
@@ -25,11 +25,26 @@ export default function VirtualCisoChat() {
         setChatInput('');
         setIsChatSending(true);
 
+        // Same crq_data_source:<username> key every other page (Overview,
+        // Ingestion, Ledger, Optimize, Reports, CommandPalette) already reads
+        // to know whether the user is on the demo fleet or their own ingested
+        // data - previously the chat request never sent this at all, so the
+        // Virtual CISO's tools always queried the demo fleet regardless of
+        // which dashboard the question came from. Defaults to 'predefined'
+        // to match backend/main.py's ChatRequest.data_source default.
+        let dataSource: 'predefined' | 'own' = 'predefined';
+        try {
+            if (username) {
+                const stored = localStorage.getItem(`crq_data_source:${username}`);
+                if (stored === 'own' || stored === 'predefined') dataSource = stored;
+            }
+        } catch (e) {}
+
         try {
             const res = await fetch(`${API_BASE}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ message: chatInput, context: null })
+                body: JSON.stringify({ message: chatInput, context: null, data_source: dataSource })
             });
 
             const reader = res.body?.getReader();

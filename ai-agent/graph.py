@@ -12,6 +12,7 @@ load_dotenv(os.path.join(project_root, "backend", ".env")) # backend/.env
 load_dotenv(os.path.join(project_root, ".env"))        # root .env
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
@@ -65,21 +66,31 @@ if llm:
         prompt="You are a Quant Analyst. Run budget optimization and VaR monte carlo simulations."
     )
 
-def security_analyst_node(state: AgentState):
+def security_analyst_node(state: AgentState, config: RunnableConfig):
+    # config carries data_source (see backend/main.py's /api/chat and
+    # tools.py's _data_source_from_config) - passing it into the sub-agent's
+    # own .invoke() is what propagates it down into query_telemetry's tool
+    # call, exactly like LangGraph propagates config to any nested Runnable.
     if security_agent:
-        result = security_agent.invoke({"messages": state["messages"]})
+        result = security_agent.invoke({"messages": state["messages"]}, config=config)
         return {"messages": [AIMessage(content=f"[Security Analyst] {result['messages'][-1].content}")], "next_agent": "supervisor"}
     return {"messages": [AIMessage(content="[Security Analyst] LLM not configured.")], "next_agent": "supervisor"}
 
-def compliance_officer_node(state: AgentState):
+def compliance_officer_node(state: AgentState, config: RunnableConfig):
+    # search_compliance_frameworks doesn't read data_source (compliance docs
+    # aren't demo/own-data scoped), but config is threaded through anyway
+    # for consistency and in case that ever changes.
     if compliance_agent:
-        result = compliance_agent.invoke({"messages": state["messages"]})
+        result = compliance_agent.invoke({"messages": state["messages"]}, config=config)
         return {"messages": [AIMessage(content=f"[Compliance Officer] {result['messages'][-1].content}")], "next_agent": "supervisor"}
     return {"messages": [AIMessage(content="[Compliance Officer] LLM not configured.")], "next_agent": "supervisor"}
 
-def quant_analyst_node(state: AgentState):
+def quant_analyst_node(state: AgentState, config: RunnableConfig):
+    # Propagates data_source into run_monte_carlo_var (optimize_budget
+    # doesn't need it - SECURITY_CONTROLS is a static catalog, not
+    # per-tenant data).
     if quant_agent:
-        result = quant_agent.invoke({"messages": state["messages"]})
+        result = quant_agent.invoke({"messages": state["messages"]}, config=config)
         return {"messages": [AIMessage(content=f"[Quant Analyst] {result['messages'][-1].content}")], "next_agent": "supervisor"}
     return {"messages": [AIMessage(content="[Quant Analyst] LLM not configured.")], "next_agent": "supervisor"}
 

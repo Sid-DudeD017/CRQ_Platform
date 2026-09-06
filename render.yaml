@@ -18,3 +18,10 @@ services:
         sync: false   # your (rotated) Groq key
       - key: SECRET_KEY
         generateValue: true   # Render generates a real random JWT signing secret
+      - key: ALLOWED_ORIGINS
+        sync: false   # optional - your deployed Vercel URL(s), comma-separated
+                       # (e.g. https://crq-platform.vercel.app). Leave this
+                       # var out of the dashboard entirely to keep the code's
+                       # default allowlist (backend/main.py's _default_origins),
+                       # which already includes that exact placeholder domain -
+                       # only needed if your Vercel URL differs from it.
