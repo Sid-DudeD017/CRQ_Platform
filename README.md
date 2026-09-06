@@ -2,7 +2,7 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-Sid--DudeD017%2FCRQ__Platform-blue?logo=github)](https://github.com/Sid-DudeD017/CRQ_Platform)
 [![CI](https://github.com/Sid-DudeD017/CRQ_Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Sid-DudeD017/CRQ_Platform/actions/workflows/ci.yml)
-![SIH](https://img.shields.io/badge/Smart%20India%20Hackathon-2025-orange)
+![SIH](https://img.shields.io/badge/Smart%20India%20Hackathon-2026-orange)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
 
