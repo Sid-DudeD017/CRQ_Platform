@@ -51,15 +51,17 @@ def run_monte_carlo_var(is_dpdp_applicable: Optional[bool] = None) -> str:
         return "No assets found in the database yet - run mock data generation first (POST /api/generate-mock-data)."
 
     # derive_fair_inputs() now also returns "risk_drivers" (the Explainable
-    # Risk Attribution waterfall) and "calibration" (the Closed-Loop
-    # Calibration Engine's state - see risk_engine.py) keys that
-    # run_fair_monte_carlo doesn't accept as keyword arguments; drop both
-    # before spreading the rest of the dict in - see the identical
-    # risk_drivers pop in backend/main.py::simulate_risk for why this is
-    # non-negotiable (run_fair_monte_carlo has a fixed parameter list with
-    # no **kwargs catch-all, so a stray key breaks every single call).
+    # Risk Attribution waterfall), "calibration" (the Closed-Loop
+    # Calibration Engine's state), and "provenance" (the evidence trail
+    # behind ALE/VaR - see risk_engine.py) keys that run_fair_monte_carlo
+    # doesn't accept as keyword arguments; drop all three before spreading
+    # the rest of the dict in - see the identical pops in
+    # backend/main.py::simulate_risk for why this is non-negotiable
+    # (run_fair_monte_carlo has a fixed parameter list with no **kwargs
+    # catch-all, so a stray key breaks every single call).
     inputs.pop("risk_drivers", None)
     inputs.pop("calibration", None)
+    inputs.pop("provenance", None)
     mc_results = quant_mc.run_fair_monte_carlo(**inputs)
     sebi = mc_results.get("sebi_resilience", {})
     uncertainty_note = ""
@@ -77,18 +79,43 @@ def run_monte_carlo_var(is_dpdp_applicable: Optional[bool] = None) -> str:
 
 
 @tool
-def query_telemetry(query: str) -> str:
+def query_telemetry(query: str = "") -> str:
     """
     Queries the central backend database for enterprise telemetry, vulnerability scans, and EDR logs.
     Use this to get context on current network topology (Adjacency Matrix) and active risks.
+
+    Pass an asset ID or (partial, case-insensitive) asset name in `query` to filter to that
+    asset's telemetry, e.g. "AST-004" or "payment gateway". Leave `query` blank to get the most
+    recent telemetry logs across all assets. Previously this parameter was accepted but never
+    actually used - every call returned the same 3 most-recent logs regardless of what was asked.
     """
     try:
         from backend.database import SessionLocal
-        from backend.models import TelemetryLog
+        from backend.models import TelemetryLog, Asset
         db = SessionLocal()
-        logs = db.query(TelemetryLog).order_by(TelemetryLog.timestamp.desc()).limit(3).all()
+        q = db.query(TelemetryLog)
+        cleaned = (query or "").strip()
+        if cleaned:
+            # Match against Asset.id or Asset.name (case-insensitive substring),
+            # then filter telemetry to the matching asset IDs. This is the only
+            # place a caller can scope the query to one asset instead of the
+            # global most-recent-3 fallback.
+            like = f"%{cleaned}%"
+            matching_asset_ids = [
+                a.id for a in db.query(Asset).filter(
+                    (Asset.id.ilike(like)) | (Asset.name.ilike(like))
+                ).all()
+            ]
+            if matching_asset_ids:
+                q = q.filter(TelemetryLog.asset_id.in_(matching_asset_ids))
+            else:
+                db.close()
+                return f"No asset found matching '{cleaned}'. Try an asset ID (e.g. 'AST-004') or part of its name."
+        logs = q.order_by(TelemetryLog.timestamp.desc()).limit(3).all()
         db.close()
         if not logs:
+            if cleaned:
+                return f"No telemetry logs found for assets matching '{cleaned}'."
             return "No telemetry logs found in the database. Please run mock data generation."
 
         results = []

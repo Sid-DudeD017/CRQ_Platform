@@ -450,6 +450,51 @@ export default function OptimizePage() {
                 </div>
             </div>
 
+            {/* Optimizer benchmark: ROSI-optimal vs. severity/CVSS-first */}
+            {result?.optimizer_benchmark && (() => {
+                const bench = result.optimizer_benchmark;
+                const deltaPct = bench.risk_reduction_delta_pct;
+                const better = bench.risk_reduction_delta > 0;
+                return (
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                        <div className="flex items-start justify-between gap-2 flex-wrap mb-stack-md">
+                            <div>
+                                <h3 className="font-title-lg text-title-lg text-primary">Optimizer vs. Severity-First Patching</h3>
+                                <p className="font-body-sm text-body-sm text-on-surface-variant max-w-lg">
+                                    Most teams triage by CVSS/KEV severity alone. Here&apos;s what the same budget ({formatINR(budgetValue)}) buys under each approach, on this run&apos;s real numbers.
+                                </p>
+                            </div>
+                            {deltaPct != null && (
+                                <span className={`font-label-caps text-label-caps px-2.5 py-1 rounded-full shrink-0 ${better ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-error/10 text-error'}`}>
+                                    {better ? '+' : ''}{deltaPct}% risk reduction vs. severity-first
+                                </span>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-gutter">
+                            <div className="border border-primary/40 bg-primary/5 rounded-xl p-stack-md">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="material-symbols-outlined text-[16px] text-primary">insights</span>
+                                    <span className="font-label-caps text-label-caps text-primary">ROSI-Optimal (0/1 Knapsack)</span>
+                                </div>
+                                <div className="font-data-mono text-[22px] font-bold text-primary">{formatINR(bench.optimal.total_risk_reduced)}</div>
+                                <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {bench.optimal.selected_patches.length} controls, {formatINR(bench.optimal.total_cost)} spent</div>
+                            </div>
+                            <div className="border border-outline-variant rounded-xl p-stack-md">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                    <span className="material-symbols-outlined text-[16px] text-on-surface-variant">priority_high</span>
+                                    <span className="font-label-caps text-label-caps text-on-surface-variant">Severity-First (CVSS/KEV greedy)</span>
+                                </div>
+                                <div className="font-data-mono text-[22px] font-bold text-on-surface-variant">{formatINR(bench.severity_first.total_risk_reduced)}</div>
+                                <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {bench.severity_first.selected_patches.length} controls, {formatINR(bench.severity_first.total_cost)} spent</div>
+                            </div>
+                        </div>
+                        <p className="font-label-caps text-label-caps text-on-surface-variant mt-stack-sm">
+                            Severity-first greedily funds the highest-CVSS/KEV controls until the budget runs out, ignoring cost-efficiency - the industry-standard baseline this optimizer is benchmarked against.
+                        </p>
+                    </div>
+                );
+            })()}
+
             {/* Step 4: Approve & log */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                 <StepHeader

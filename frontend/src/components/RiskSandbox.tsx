@@ -391,6 +391,74 @@ export default function RiskSandbox({
 )}
 </div>
 </div>
+{/*  Evidence/provenance trail for ALE/VaR  */}
+<div className="grid grid-cols-12 gap-gutter mb-stack-lg">
+<div className="col-span-12 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
+{simResults?.provenance ? (() => {
+    const p = simResults.provenance;
+    const fi = p.fair_inputs || {};
+    const rows: { label: string; range: string }[] = [
+        { label: 'Threat Event Frequency (events/yr)', range: `${fi.tef_min?.toFixed(1)} – ${fi.tef_mode?.toFixed(1)} – ${fi.tef_max?.toFixed(1)}` },
+        { label: 'Threat Capability (0–100)', range: `${fi.tc_min?.toFixed(1)} – ${fi.tc_mode?.toFixed(1)} – ${fi.tc_max?.toFixed(1)}` },
+        { label: 'Control Strength (0–100)', range: `${fi.cs_min?.toFixed(1)} – ${fi.cs_mode?.toFixed(1)} – ${fi.cs_max?.toFixed(1)}` },
+        { label: 'Primary Loss Magnitude (₹)', range: `${(fi.plm_min / 100000)?.toFixed(1)}L – ${(fi.plm_mode / 100000)?.toFixed(1)}L – ${(fi.plm_max / 100000)?.toFixed(1)}L` },
+        { label: 'Secondary Loss Magnitude (₹)', range: `${(fi.slm_min / 100000)?.toFixed(1)}L – ${(fi.slm_mode / 100000)?.toFixed(1)}L – ${(fi.slm_max / 100000)?.toFixed(1)}L` },
+    ];
+    return (
+        <details className="group">
+            <summary className="cursor-pointer list-none flex items-center justify-between gap-2 select-none">
+                <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
+                    <div>
+                        <span className="font-title-lg text-title-lg text-primary">Where these numbers come from</span>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">The exact FAIR ranges and live data behind this run&apos;s ALE and VaR - not just the headline figure.</p>
+                    </div>
+                </div>
+                <span className="font-label-caps text-label-caps text-on-surface-variant shrink-0">{p.num_simulations?.toLocaleString()} Monte Carlo iterations</span>
+            </summary>
+            <div className="mt-stack-md space-y-3">
+                <div className="flex flex-wrap gap-2">
+                    <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                        {p.data_source === 'own' ? 'Own Data' : 'Demo Data'}
+                    </span>
+                    <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                        {p.asset_count} asset{p.asset_count === 1 ? '' : 's'}
+                    </span>
+                    <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                        {p.telemetry_log_count} telemetry log{p.telemetry_log_count === 1 ? '' : 's'}
+                    </span>
+                    {p.confirmed_mapping_count > 0 && (
+                        <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                            {p.confirmed_mapping_count} confirmed ingestion finding{p.confirmed_mapping_count === 1 ? '' : 's'}
+                        </span>
+                    )}
+                    {p.latest_telemetry_at && (
+                        <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant">
+                            Freshest telemetry: {new Date(p.latest_telemetry_at).toLocaleString()}
+                        </span>
+                    )}
+                </div>
+                <div className="border border-outline-variant rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-2 bg-surface-container px-3 py-1.5">
+                        <span className="font-label-caps text-label-caps text-on-surface-variant">FAIR input (triangular)</span>
+                        <span className="font-label-caps text-label-caps text-on-surface-variant text-right">min – mode – max</span>
+                    </div>
+                    {rows.map((r) => (
+                        <div key={r.label} className="grid grid-cols-2 px-3 py-1.5 border-t border-outline-variant">
+                            <span className="font-body-sm text-body-sm">{r.label}</span>
+                            <span className="font-data-mono text-data-mono text-right">{r.range}</span>
+                        </div>
+                    ))}
+                </div>
+                <p className="font-label-caps text-label-caps text-on-surface-variant">
+                    These ranges feed run_fair_monte_carlo directly - the same {p.num_simulations?.toLocaleString()}-iteration simulation that produced the ALE and VaR figures above, drawn from exactly the live asset/telemetry rows counted here.
+                </p>
+            </div>
+        </details>
+    );
+})() : null}
+</div>
+</div>
 {/*  Bottom Row: Sandbox & Breakdown  */}
 <div ref={bottomSectionRef} className="grid grid-cols-12 gap-gutter animate-result-reveal">
 {/*  What-If Sandbox  */}

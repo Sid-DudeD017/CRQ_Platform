@@ -41,20 +41,32 @@ from . import generators, models
 # ~Rs 1.60 Cr in claimed reduction - a believable "comprehensive program
 # costs a good deal less than one year's expected loss, and doesn't fully
 # eliminate it" shape relative to the real baseline ALE.
+# [Optimizer benchmark] "severity" is a CVSS-style 0-10 score for the class
+# of exploit each control closes off - assigned independently of cost/
+# risk_reduction (unlike those two, which are tuned to this org's actual
+# ALE - see the note above), specifically so a naive "patch by severity"
+# ordering genuinely disagrees with the ROI-optimal knapsack ordering
+# instead of trivially matching it. Used by optimizer.optimize_budget_
+# severity_first as the industry-standard baseline the real optimizer is
+# benchmarked against (see build_optimizer_benchmark below) - e.g. Threat
+# Intel & KEV scores high because it directly addresses CISA's Known
+# Exploited Vulnerabilities catalog; 24/7 SOC Monitoring scores low
+# because it's a detective control, not something that closes an
+# exploitable vulnerability on its own.
 SECURITY_CONTROLS = [
-    {"id": "Enforce Cloud MFA", "cost": 400000, "risk_reduction": 1400000},
-    {"id": "Patch Payment Gateway", "cost": 1000000, "risk_reduction": 1800000},
-    {"id": "Zero Trust Architecture", "cost": 1600000, "risk_reduction": 2200000},
+    {"id": "Enforce Cloud MFA", "cost": 400000, "risk_reduction": 1400000, "severity": 7.5},
+    {"id": "Patch Payment Gateway", "cost": 1000000, "risk_reduction": 1800000, "severity": 9.8},
+    {"id": "Zero Trust Architecture", "cost": 1600000, "risk_reduction": 2200000, "severity": 6.5},
     # --- 8 additional controls, each wired to its own real FAIR input term
     # in derive_fair_inputs below (never a UI-only toggle) ---
-    {"id": "Least-Privilege IAM Review", "cost": 200000, "risk_reduction": 600000},
-    {"id": "EDR Health Remediation", "cost": 500000, "risk_reduction": 1200000},
-    {"id": "Host Isolation & Incident Containment", "cost": 800000, "risk_reduction": 1900000},
-    {"id": "Public Exposure Hardening (WAF)", "cost": 700000, "risk_reduction": 1600000},
-    {"id": "CSPM Auto-Remediation", "cost": 500000, "risk_reduction": 1100000},
-    {"id": "Threat Intel & KEV Patch Program", "cost": 800000, "risk_reduction": 1400000},
-    {"id": "24/7 SOC Monitoring", "cost": 900000, "risk_reduction": 1500000},
-    {"id": "PII Data Minimization & Tokenization", "cost": 1000000, "risk_reduction": 1300000},
+    {"id": "Least-Privilege IAM Review", "cost": 200000, "risk_reduction": 600000, "severity": 5.5},
+    {"id": "EDR Health Remediation", "cost": 500000, "risk_reduction": 1200000, "severity": 6.0},
+    {"id": "Host Isolation & Incident Containment", "cost": 800000, "risk_reduction": 1900000, "severity": 5.0},
+    {"id": "Public Exposure Hardening (WAF)", "cost": 700000, "risk_reduction": 1600000, "severity": 8.5},
+    {"id": "CSPM Auto-Remediation", "cost": 500000, "risk_reduction": 1100000, "severity": 6.5},
+    {"id": "Threat Intel & KEV Patch Program", "cost": 800000, "risk_reduction": 1400000, "severity": 9.0},
+    {"id": "24/7 SOC Monitoring", "cost": 900000, "risk_reduction": 1500000, "severity": 4.5},
+    {"id": "PII Data Minimization & Tokenization", "cost": 1000000, "risk_reduction": 1300000, "severity": 5.5},
 ]
 
 # [ISO/IEC 27001 & CIS Controls v8 mapping] The SIH problem statement
@@ -787,6 +799,39 @@ def derive_fair_inputs(
     # SLM triangular ranges get - a model whose predictions have swung
     # wildly against reality should show that as real uncertainty on every
     # subsequent Monte Carlo run, not a false-precision fixed 0.5x/2x band.
+    # [Evidence/provenance trail] The triangular FAIR inputs above (tef_*,
+    # tc_*, cs_*, plm_*, slm_*) are exactly what run_fair_monte_carlo draws
+    # from to produce ALE/VaR - but until now they were computed, spread
+    # into that call, and then discarded, so a board member asking "where
+    # exactly did this number come from" had no answer beyond the
+    # Explainable Risk Attribution waterfall (which explains Control
+    # Strength, not ALE/VaR themselves). This block is that answer for
+    # ALE/VaR: the exact triangular ranges fed into the simulation, how
+    # many live rows they were derived from, how fresh that telemetry is,
+    # and the iteration count - popped by callers the same way
+    # risk_drivers/calibration already are (see main.py::simulate_risk and
+    # ai-agent/tools.py::run_monte_carlo_var) before spreading the rest of
+    # this dict into run_fair_monte_carlo.
+    latest_telemetry_at = max((log.timestamp for log in latest_logs), default=None)
+    provenance = {
+        "data_source": data_source,
+        "asset_count": len(assets),
+        "telemetry_log_count": len(latest_logs),
+        "confirmed_mapping_count": len(confirmed_mappings),
+        "latest_telemetry_at": latest_telemetry_at.isoformat() if latest_telemetry_at else None,
+        # Mirrors run_fair_monte_carlo's num_simulations default
+        # (quant-engine/monte_carlo.py) - no caller anywhere overrides it,
+        # so this is always the actual iteration count used, not a guess.
+        "num_simulations": 10000,
+        "fair_inputs": {
+            "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
+            "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
+            "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
+            "plm_min": (base_plm * 0.5) / loss_variance_multiplier, "plm_mode": base_plm, "plm_max": (base_plm * 2.0) * loss_variance_multiplier,
+            "slm_min": (base_slm * 0.5) / loss_variance_multiplier, "slm_mode": base_slm, "slm_max": (base_slm * 2.0) * loss_variance_multiplier,
+        },
+    }
+
     return {
         "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
         "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
@@ -796,6 +841,7 @@ def derive_fair_inputs(
         "is_dpdp_applicable": is_dpdp,
         "risk_drivers": risk_drivers,
         "calibration": calibration,
+        "provenance": provenance,
     }
 
 

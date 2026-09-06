@@ -383,8 +383,33 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
     # exact same fixed-signature problem, so it must be popped here too.
     risk_drivers = inputs.pop("risk_drivers", {})
     inputs.pop("calibration", None)
+    # [Evidence/provenance trail] same fixed-signature reason risk_drivers/
+    # calibration get popped above - see risk_engine.derive_fair_inputs'
+    # provenance comment for what this carries and why.
+    provenance = inputs.pop("provenance", {})
     mc_results = quant_mc.run_fair_monte_carlo(**inputs)
     opt_results = quant_opt.optimize_budget(risk_engine.SECURITY_CONTROLS, payload.budget)
+    # [Optimizer benchmark] the same budget, allocated the way most
+    # organizations actually triage remediation (highest CVSS/KEV severity
+    # first) instead of by cost-efficiency - see quant_opt.
+    # optimize_budget_severity_first's docstring. Lets the Optimize page
+    # show, on this run's real numbers, how much more risk reduction the
+    # 0/1 knapsack optimizer extracts from the same rupee of budget.
+    severity_opt_results = quant_opt.optimize_budget_severity_first(risk_engine.SECURITY_CONTROLS, payload.budget)
+    optimizer_benchmark = {
+        "optimal": opt_results,
+        "severity_first": severity_opt_results,
+        "risk_reduction_delta": opt_results["total_risk_reduced"] - severity_opt_results["total_risk_reduced"],
+        "risk_reduction_delta_pct": (
+            round(
+                (opt_results["total_risk_reduced"] - severity_opt_results["total_risk_reduced"])
+                / severity_opt_results["total_risk_reduced"] * 100.0,
+                1,
+            )
+            if severity_opt_results["total_risk_reduced"] > 0
+            else None
+        ),
+    }
     business_unit_breakdown = risk_engine.compute_business_unit_breakdown(
         db, mc_results["mean_expected_loss"], calibration=calibration, data_source=payload.data_source
     )
@@ -437,6 +462,10 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
             },
         "sebi_resilience": mc_results.get("sebi_resilience", {}),
         "optimization": opt_results,
+        # [Optimizer benchmark] optimal (ROSI-maximizing knapsack) vs.
+        # severity-first (CVSS/KEV-style greedy) allocation of this exact
+        # budget - powers the Optimize page's benchmark comparison card.
+        "optimizer_benchmark": optimizer_benchmark,
         "business_unit_breakdown": business_unit_breakdown,
         # [Explainable Risk Attribution] the named Control Strength/TEF
         # waterfall components behind this run's numbers - see
@@ -454,6 +483,12 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
         # the confidence_band comment above.
         "calibration": calibration,
         "confidence_band": confidence_band,
+        # [Evidence/provenance trail] exactly which triangular FAIR ranges,
+        # how many live asset/telemetry/mapping rows, and how many Monte
+        # Carlo iterations produced this run's ALE/VaR - see
+        # risk_engine.derive_fair_inputs' provenance comment. Powers the
+        # Overview "Where this number comes from" panel.
+        "provenance": provenance,
     }
 
 
