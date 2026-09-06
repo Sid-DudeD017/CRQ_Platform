@@ -1,5 +1,6 @@
 "use client";
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { API_BASE, fetchWithRetry } from '@/lib/api';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import CountUp from './CountUp';
 
@@ -88,6 +89,66 @@ export default function RiskSandbox({
     // refreshing. Toggling the CSS class off and back on - forcing a
     // reflow in between so the browser treats it as a fresh animation
     // start, not a no-op - restarts it in place instead.
+    // "Why?" scenario-breakdown disclosure on the ALE headline (see
+    // backend/risk_engine.py::compute_scenario_breakdown) - previously the
+    // info button next to "Annualized Loss Expectancy" below did nothing
+    // at all.
+    const [showAleWhy, setShowAleWhy] = useState(false);
+
+    // [Attack Path] real BFS over the actual NetworkEdge topology (see
+    // POST /api/attack-path) from every internet-facing asset to a
+    // user-picked target - toggling "Public Exposure Hardening (WAF)"
+    // below re-fetches and can make the path genuinely disappear, since
+    // that control removes public assets from the entry-point set
+    // server-side rather than this panel faking the effect client-side.
+    const [assetOptions, setAssetOptions] = useState<any[]>([]);
+    const [selectedTargetId, setSelectedTargetId] = useState<string>('');
+    const [attackPath, setAttackPath] = useState<any>(null);
+    const [isLoadingPath, setIsLoadingPath] = useState(false);
+    const dataSourceForPath = simResults?.data_source || (sandboxMode === 'whatIf' ? 'own' : 'predefined');
+    const wafActive = !!controls['Public Exposure Hardening (WAF)'];
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetchWithRetry(`${API_BASE}/api/assets?data_source=${dataSourceForPath}`);
+                if (!res.ok || cancelled) return;
+                const data = await res.json();
+                const list = data.data || [];
+                if (cancelled) return;
+                setAssetOptions(list);
+                setSelectedTargetId((prev) => prev && list.some((a: any) => a.id === prev) ? prev : (list[0]?.id || ''));
+            } catch (e) { /* silent - panel just stays empty */ }
+        })();
+        return () => { cancelled = true; };
+    }, [dataSourceForPath]);
+
+    useEffect(() => {
+        if (!selectedTargetId) { setAttackPath(null); return; }
+        let cancelled = false;
+        setIsLoadingPath(true);
+        (async () => {
+            try {
+                const res = await fetchWithRetry(`${API_BASE}/api/attack-path`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        target_asset_id: selectedTargetId,
+                        active_controls: controls,
+                        data_source: dataSourceForPath,
+                    }),
+                });
+                if (!res.ok || cancelled) return;
+                const data = await res.json();
+                if (!cancelled) setAttackPath(data.data);
+            } catch (e) { /* silent - panel shows "no path" state */ }
+            finally { if (!cancelled) setIsLoadingPath(false); }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedTargetId, JSON.stringify(controls), dataSourceForPath]);
+
     const heroSectionRef = useRef<HTMLDivElement>(null);
     const attributionSectionRef = useRef<HTMLDivElement>(null);
     const bottomSectionRef = useRef<HTMLDivElement>(null);
@@ -188,7 +249,16 @@ export default function RiskSandbox({
 <div>
 <div className="flex justify-between items-start mb-stack-sm">
 <h3 className="font-title-lg text-title-lg text-primary">Annualized Loss Expectancy</h3>
-<button className="text-on-surface-variant hover:text-primary"><span className="material-symbols-outlined text-[20px]">info</span></button>
+<button
+    type="button"
+    onClick={() => setShowAleWhy((v) => !v)}
+    disabled={!simResults?.scenario_breakdown}
+    aria-expanded={showAleWhy}
+    title="Why? See the real attack-scenario breakdown behind this number"
+    className="text-on-surface-variant hover:text-primary disabled:opacity-40 disabled:hover:text-on-surface-variant"
+>
+    <span className="material-symbols-outlined text-[20px]">info</span>
+</button>
 </div>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Projected financial impact based on current control posture.</p>
 </div>
@@ -228,6 +298,43 @@ export default function RiskSandbox({
         )}
     </div>
 )}
+{showAleWhy && simResults?.scenario_breakdown?.scenarios?.length > 0 && (() => {
+    const sb = simResults.scenario_breakdown;
+    const prov = simResults.provenance;
+    return (
+        <div className="mt-stack-sm pt-stack-sm border-t border-outline-variant space-y-2">
+            {sb.scenarios.map((s: any) => (
+                <div key={s.scenario} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                        <div className="font-body-sm text-body-sm text-on-surface truncate">{s.scenario}</div>
+                        {s.supporting_signals?.length > 0 && (
+                            <div className="font-label-caps text-label-caps text-on-surface-variant truncate" title={s.supporting_signals.join(', ')}>
+                                {s.asset_count} asset{s.asset_count === 1 ? '' : 's'} - {s.supporting_signals.join(', ')}
+                            </div>
+                        )}
+                    </div>
+                    <div className="text-right shrink-0">
+                        <div className="font-data-mono text-body-sm font-semibold text-on-surface">{s.share_pct}%</div>
+                        <div className="font-label-caps text-label-caps text-on-surface-variant">₹{(s.allocated_var_95 / 10000000).toFixed(2)} Cr P95</div>
+                    </div>
+                </div>
+            ))}
+            {prov && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1 font-label-caps text-label-caps text-on-surface-variant">
+                    <span>{prov.num_simulations?.toLocaleString()} iterations</span>
+                    {prov.model_confidence && <span>Model confidence: {prov.model_confidence}</span>}
+                    {prov.top_uncertainty_driver && <span>Top uncertainty driver: {prov.top_uncertainty_driver}</span>}
+                    {prov.latest_telemetry_at && (
+                        <span>Data as of {new Date(prov.latest_telemetry_at).toLocaleString()}</span>
+                    )}
+                </div>
+            )}
+            <p className="font-label-caps text-label-caps text-on-surface-variant/80">
+                Allocated by real per-asset telemetry signals (endpoint compromise, exposure, sensitive data) weighted by business value - not a scripted split. See risk_engine.compute_scenario_breakdown.
+            </p>
+        </div>
+    );
+})()}
 </div>
 </div>
 {/*  Scorecards  */}
@@ -457,6 +564,74 @@ export default function RiskSandbox({
         </details>
     );
 })() : null}
+</div>
+</div>
+{/*  Attack Path: real BFS over NetworkEdge topology (see POST /api/attack-path)  */}
+<div className="grid grid-cols-12 gap-gutter mb-stack-lg">
+<div className="col-span-12 bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
+<details className="group">
+    <summary className="cursor-pointer list-none flex items-center justify-between gap-2 select-none flex-wrap">
+        <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
+            <div>
+                <span className="font-title-lg text-title-lg text-primary">Attack Path</span>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">Real shortest path from an internet-facing asset to a target, over the actual network topology.</p>
+            </div>
+        </div>
+        {wafActive && (
+            <span className="font-label-caps text-label-caps px-2 py-1 rounded-full bg-[#15803d]/10 text-[#15803d] shrink-0">WAF hardening active</span>
+        )}
+    </summary>
+    <div className="mt-stack-md space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+            <label htmlFor="attack-path-target" className="font-label-caps text-label-caps text-on-surface-variant">Target asset</label>
+            <select
+                id="attack-path-target"
+                value={selectedTargetId}
+                onChange={(e) => setSelectedTargetId(e.target.value)}
+                className="border border-outline-variant bg-surface rounded px-2 py-1 font-body-sm text-body-sm"
+            >
+                {assetOptions.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.business_unit})</option>
+                ))}
+            </select>
+        </div>
+        {isLoadingPath ? (
+            <div className="h-16 bg-surface-variant/40 rounded-lg animate-pulse" />
+        ) : attackPath ? (
+            attackPath.path_found ? (
+                <>
+                    <div className="flex items-center gap-1.5 flex-wrap font-data-mono text-data-mono text-on-surface">
+                        <span className="px-2 py-1 bg-surface-container rounded border border-outline-variant">Internet</span>
+                        {attackPath.path.map((node: any) => (
+                            <React.Fragment key={node.id}>
+                                <span className="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
+                                <span className="px-2 py-1 bg-surface-container rounded border border-outline-variant" title={node.business_unit}>{node.name}</span>
+                            </React.Fragment>
+                        ))}
+                    </div>
+                    {attackPath.loss_range && (
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">
+                            Estimated loss if this path is exploited: <span className="font-data-mono font-semibold text-on-surface">₹{(attackPath.loss_range.low / 10000000).toFixed(2)}–₹{(attackPath.loss_range.high / 10000000).toFixed(2)} Cr</span> ({attackPath.hop_count} hop{attackPath.hop_count === 1 ? '' : 's'} from the network edge), scaled from this run&apos;s real ALE/VaR by this asset&apos;s share of total business value.
+                        </p>
+                    )}
+                </>
+            ) : (
+                <p className="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px] text-[#15803d]">shield</span>
+                    {attackPath.blocked_by_waf
+                        ? 'No path found - Public Exposure Hardening (WAF) removes every internet-facing asset as an entry point.'
+                        : 'No path found from any internet-facing asset to this target over the current network topology.'}
+                </p>
+            )
+        ) : (
+            <p className="font-body-sm text-body-sm text-on-surface-variant">Pick a target asset to trace its attack path.</p>
+        )}
+        <p className="font-label-caps text-label-caps text-on-surface-variant">
+            Toggle &quot;Public Exposure Hardening (WAF)&quot; in Strategic Controls below and re-open this panel - a real, live BFS re-run, not a canned before/after.
+        </p>
+    </div>
+</details>
 </div>
 </div>
 {/*  Bottom Row: Sandbox & Breakdown  */}

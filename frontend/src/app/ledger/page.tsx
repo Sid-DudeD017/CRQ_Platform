@@ -14,6 +14,18 @@ interface Decision {
     tx_hash: string | null;
     on_chain: boolean;
     data_source?: string | null;
+    // [Risk Decision Passport] all optional - a legacy or minimal-input
+    // decision simply renders fewer rows in the expanded passport below,
+    // never a broken one.
+    board_approved?: boolean;
+    model_snapshot?: string | null;
+    residual_ale?: number | null;
+    p95?: number | null;
+    accepted_scenario?: string | null;
+    recommended_control_not_funded?: string | null;
+    reason?: string | null;
+    evidence_hash?: string | null;
+    review_expiry?: string | null;
 }
 
 function truncateHash(hash: string) {
@@ -28,6 +40,7 @@ export default function LedgerPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [copiedId, setCopiedId] = useState<number | null>(null);
+    const [expandedPassportId, setExpandedPassportId] = useState<number | null>(null);
     const [isClearModalOpen, setIsClearModalOpen] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
     const [clearError, setClearError] = useState<string | null>(null);
@@ -293,11 +306,13 @@ export default function LedgerPage() {
                                     <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Decided By</th>
                                     <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Date</th>
                                     <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Chain Status</th>
+                                    <th className="py-3 px-4 font-label-caps text-label-caps text-on-surface-variant">Passport</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {decisions.map((d) => (
-                                    <tr key={d.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors animate-fade-scale-in">
+                                    <React.Fragment key={d.id}>
+                                    <tr className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors animate-fade-scale-in">
                                         <td className="py-3 px-4 font-data-mono text-data-mono text-on-surface-variant">#{d.id}</td>
                                         <td className="py-3 px-4 font-body-sm text-body-sm">{d.action}</td>
                                         <td className="py-3 px-4 font-data-mono text-data-mono font-bold">₹{(d.risk_accepted / 10000000).toFixed(2)} Cr</td>
@@ -339,7 +354,49 @@ export default function LedgerPage() {
                                                 </div>
                                             )}
                                         </td>
+                                        <td className="py-3 px-4">
+                                            <button
+                                                onClick={() => setExpandedPassportId(expandedPassportId === d.id ? null : d.id)}
+                                                title="View this decision's full Risk Decision Passport"
+                                                className="flex items-center gap-1 px-2 py-1 border border-outline-variant rounded font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-low transition-colors"
+                                            >
+                                                <span className="material-symbols-outlined text-[14px]">{expandedPassportId === d.id ? 'expand_less' : 'badge'}</span>
+                                                {expandedPassportId === d.id ? 'Hide' : 'View'}
+                                            </button>
+                                        </td>
                                     </tr>
+                                    {expandedPassportId === d.id && (() => {
+                                        const rows: { label: string; value: React.ReactNode }[] = [
+                                            { label: 'Risk owner', value: d.decided_by },
+                                            { label: 'Model snapshot', value: d.model_snapshot ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_snapshot}</code> : '—' },
+                                            { label: 'Residual ALE', value: typeof d.residual_ale === 'number' ? `₹${(d.residual_ale / 10000000).toFixed(2)} Cr` : '—' },
+                                            { label: 'P95 (VaR)', value: typeof d.p95 === 'number' ? `₹${(d.p95 / 10000000).toFixed(2)} Cr` : '—' },
+                                            { label: 'Accepted scenario', value: d.accepted_scenario || '—' },
+                                            { label: 'Recommended control not funded', value: d.recommended_control_not_funded || 'None - fully funded to the optimizer\'s recommendation' },
+                                            { label: 'Reason', value: d.reason || '—' },
+                                            { label: 'Evidence hash', value: d.evidence_hash ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded break-all">{d.evidence_hash}</code> : '—' },
+                                            { label: 'Approvals', value: d.board_approved ? 'Board-approved' : `${d.decided_by} (individual acceptance)` },
+                                            { label: 'Decision date', value: new Date(d.created_at).toLocaleString() },
+                                            { label: 'Review / expiry', value: d.review_expiry ? new Date(d.review_expiry).toLocaleDateString() : '—' },
+                                            { label: 'Ledger hash', value: d.on_chain && d.tx_hash ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded break-all">{d.tx_hash}</code> : 'Off-chain' },
+                                        ];
+                                        return (
+                                            <tr key={`${d.id}-passport`} className="border-b border-outline-variant last:border-0 bg-surface-container-low/60">
+                                                <td colSpan={7} className="px-4 py-4">
+                                                    <div className="mb-2 font-title-lg text-title-lg text-primary">Risk Decision Passport - #{d.id}</div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                                                        {rows.map((r) => (
+                                                            <div key={r.label} className="flex justify-between gap-3 border-b border-outline-variant/50 py-1">
+                                                                <span className="font-label-caps text-label-caps text-on-surface-variant shrink-0">{r.label}</span>
+                                                                <span className="font-body-sm text-body-sm text-right">{r.value}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })()}
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>
@@ -404,7 +461,7 @@ export default function LedgerPage() {
                             <div>
                                 <h3 className="font-title-lg text-title-lg text-primary">Reset the entire demo?</h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-                                    This permanently clears BOTH dashboards' audit ledgers and run history, every logged
+                                    This permanently clears BOTH dashboards&apos; audit ledgers and run history, every logged
                                     incident and calibration trend, all training completions, and every confirmed
                                     Ingestion Engine mapping - then regenerates a fresh demo fleet and a fresh own-data
                                     starter fleet. Use this between separate demo sessions so the next one starts from

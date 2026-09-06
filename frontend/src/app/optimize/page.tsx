@@ -450,46 +450,91 @@ export default function OptimizePage() {
                 </div>
             </div>
 
-            {/* Optimizer benchmark: ROSI-optimal vs. severity/CVSS-first */}
+            {/* Optimizer benchmark: ROSI-optimal vs. severity-first vs. KEV/threat-first -
+                three real triage philosophies on the same budget, all numbers from this
+                run's actual simulate-risk response (see backend/main.py's optimizer_benchmark). */}
             {result?.optimizer_benchmark && (() => {
                 const bench = result.optimizer_benchmark;
                 const deltaPct = bench.risk_reduction_delta_pct;
-                const better = bench.risk_reduction_delta > 0;
+                const kevDeltaPct = bench.kev_risk_reduction_delta_pct;
+                const bestBaselineReduction = Math.max(
+                    bench.severity_first.total_risk_reduced,
+                    bench.kev_first?.total_risk_reduced ?? 0,
+                );
+                const columns = [
+                    {
+                        key: 'severity_first',
+                        label: 'Severity-First (CVSS greedy)',
+                        icon: 'priority_high',
+                        data: bench.severity_first,
+                    },
+                    ...(bench.kev_first ? [{
+                        key: 'kev_first',
+                        label: 'KEV/Threat-First (greedy)',
+                        icon: 'bolt',
+                        data: bench.kev_first,
+                    }] : []),
+                    {
+                        key: 'optimal',
+                        label: 'ROSI-Optimal (0/1 Knapsack)',
+                        icon: 'insights',
+                        data: bench.optimal,
+                        highlight: true,
+                    },
+                ];
                 return (
                     <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                         <div className="flex items-start justify-between gap-2 flex-wrap mb-stack-md">
                             <div>
-                                <h3 className="font-title-lg text-title-lg text-primary">Optimizer vs. Severity-First Patching</h3>
+                                <h3 className="font-title-lg text-title-lg text-primary">Three Ways to Spend the Same Budget</h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant max-w-lg">
-                                    Most teams triage by CVSS/KEV severity alone. Here&apos;s what the same budget ({formatINR(budgetValue)}) buys under each approach, on this run&apos;s real numbers.
+                                    Most teams triage by CVSS severity, or by what&apos;s actively being exploited (KEV/threat intel).
+                                    Here&apos;s what {formatINR(budgetValue)} actually buys under each approach, on this run&apos;s real
+                                    numbers - not a scripted example.
                                 </p>
                             </div>
-                            {deltaPct != null && (
-                                <span className={`font-label-caps text-label-caps px-2.5 py-1 rounded-full shrink-0 ${better ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-error/10 text-error'}`}>
-                                    {better ? '+' : ''}{deltaPct}% risk reduction vs. severity-first
-                                </span>
-                            )}
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                {deltaPct != null && (
+                                    <span className={`font-label-caps text-label-caps px-2.5 py-1 rounded-full ${bench.risk_reduction_delta > 0 ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-error/10 text-error'}`}>
+                                        {bench.risk_reduction_delta > 0 ? '+' : ''}{deltaPct}% vs. severity-first
+                                    </span>
+                                )}
+                                {kevDeltaPct != null && (
+                                    <span className={`font-label-caps text-label-caps px-2.5 py-1 rounded-full ${bench.kev_risk_reduction_delta > 0 ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-error/10 text-error'}`}>
+                                        {bench.kev_risk_reduction_delta > 0 ? '+' : ''}{kevDeltaPct}% vs. KEV-first
+                                    </span>
+                                )}
+                            </div>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-gutter">
-                            <div className="border border-primary/40 bg-primary/5 rounded-xl p-stack-md">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                    <span className="material-symbols-outlined text-[16px] text-primary">insights</span>
-                                    <span className="font-label-caps text-label-caps text-primary">ROSI-Optimal (0/1 Knapsack)</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-gutter">
+                            {columns.map((col) => (
+                                <div
+                                    key={col.key}
+                                    className={col.highlight ? 'border border-primary/40 bg-primary/5 rounded-xl p-stack-md' : 'border border-outline-variant rounded-xl p-stack-md'}
+                                >
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                        <span className={`material-symbols-outlined text-[16px] ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.icon}</span>
+                                        <span className={`font-label-caps text-label-caps ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.label}</span>
+                                    </div>
+                                    <div className={`font-data-mono text-[22px] font-bold ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(col.data.total_risk_reduced)}</div>
+                                    <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {col.data.selected_patches.length} controls, {formatINR(col.data.total_cost)} spent</div>
+                                    {col.highlight && (
+                                        <ul className="mt-stack-sm space-y-0.5">
+                                            {col.data.selected_patches.map((id: string) => (
+                                                <li key={id} className="font-body-sm text-body-sm text-primary flex items-center gap-1">
+                                                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                                                    {id}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
-                                <div className="font-data-mono text-[22px] font-bold text-primary">{formatINR(bench.optimal.total_risk_reduced)}</div>
-                                <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {bench.optimal.selected_patches.length} controls, {formatINR(bench.optimal.total_cost)} spent</div>
-                            </div>
-                            <div className="border border-outline-variant rounded-xl p-stack-md">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                    <span className="material-symbols-outlined text-[16px] text-on-surface-variant">priority_high</span>
-                                    <span className="font-label-caps text-label-caps text-on-surface-variant">Severity-First (CVSS/KEV greedy)</span>
-                                </div>
-                                <div className="font-data-mono text-[22px] font-bold text-on-surface-variant">{formatINR(bench.severity_first.total_risk_reduced)}</div>
-                                <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {bench.severity_first.selected_patches.length} controls, {formatINR(bench.severity_first.total_cost)} spent</div>
-                            </div>
+                            ))}
                         </div>
                         <p className="font-label-caps text-label-caps text-on-surface-variant mt-stack-sm">
-                            Severity-first greedily funds the highest-CVSS/KEV controls until the budget runs out, ignoring cost-efficiency - the industry-standard baseline this optimizer is benchmarked against.
+                            Severity-first funds the highest-CVSS controls first; KEV/threat-first funds whatever&apos;s most
+                            tied to actively-exploited vulnerabilities first - both ignore cost-efficiency. The 0/1 knapsack
+                            optimizer extracts {bestBaselineReduction > 0 ? `${Math.round((bench.optimal.total_risk_reduced / bestBaselineReduction - 1) * 100)}% more` : 'more'} risk reduction than the better of the two, from the exact same rupee.
                         </p>
                     </div>
                 );

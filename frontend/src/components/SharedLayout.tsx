@@ -373,7 +373,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     Getting Started
                                 </span>
                                 <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-1">How do you want to start?</h1>
-                                <p className="font-body-md text-body-md text-on-surface-variant max-w-xl mx-auto">Pick one - you can switch anytime from "Switch Dashboard" in the top bar, and nothing you've already run gets lost.</p>
+                                <p className="font-body-md text-body-md text-on-surface-variant max-w-xl mx-auto">Pick one - you can switch anytime from &quot;Switch Dashboard&quot; in the top bar, and nothing you&apos;ve already run gets lost.</p>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-stack-lg">
                                 <button

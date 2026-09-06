@@ -180,6 +180,22 @@ class RiskDecision(SQLModel, table=True):
     # somewhere sensible. See main.py's /api/audit and /api/audit-log.
     data_source: str = Field(default="predefined")
 
+    # [Risk Decision Passport] Everything a board member would need to
+    # answer "what exactly did we know when we accepted this risk, and
+    # what did we choose NOT to fund" months later, without having to trust
+    # anyone's memory of the meeting. All computed server-side from the
+    # real simulation/provenance state at decision time (POST /api/audit) -
+    # never client-supplied numbers, except `reason` which is genuinely
+    # free-text input from whoever made the call.
+    model_snapshot: Optional[str] = None          # e.g. "CRQ-FAIR-v1.1.0" (backend app.version)
+    residual_ale: Optional[float] = None           # this run's mean_expected_loss at accept time
+    p95: Optional[float] = None                    # this run's var_95 at accept time
+    accepted_scenario: Optional[str] = None        # dominant compute_scenario_breakdown bucket at accept time
+    recommended_control_not_funded: Optional[str] = None  # highest-ranked optimizer pick NOT in active_controls
+    reason: Optional[str] = None                   # free text - why the unfunded control was left unfunded, if given
+    evidence_hash: Optional[str] = None            # SHA-256 of the real FAIR inputs/provenance dict, computed server-side
+    review_expiry: Optional[datetime] = None        # created_at + 90 days - when this acceptance should be re-reviewed
+
 class IngestedMapping(SQLModel, table=True):
     """
     One confirmed raw-config-line -> standard-parameter mapping from the

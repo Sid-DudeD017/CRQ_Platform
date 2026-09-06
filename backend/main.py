@@ -16,9 +16,11 @@ Merged from two branches off the same base (12462e7):
   of Siddharth's Sepolia client for live-demo reliability - no wallet/RPC
   key/network dependency), and GET /api/audit-log backing the ledger page.
 """
+import hashlib
+import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import UploadFile, File, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
@@ -125,6 +127,23 @@ class AuditRequest(BaseModel):
     # from landing in the same undifferentiated ledger. See
     # models.RiskDecision.data_source and GET /api/audit-log.
     data_source: str = "predefined"
+    # [Risk Decision Passport] optional context from the simulation this
+    # decision is based on. All genuinely optional (old callers/tests that
+    # only send action/risk_accepted still work exactly as before) - when
+    # residual_ale/p95/active_controls are given, the server computes a
+    # real evidence hash, unfunded-control comparison, and scenario
+    # snapshot from them; none of this is trusted as-is from the client
+    # except reason, which is real free text, and residual_ale/p95/
+    # accepted_scenario, which are read directly off the same simResults
+    # object already displayed on screen (not independently recomputed,
+    # since re-simulating here could legitimately return different numbers
+    # than what the user actually looked at when they clicked Accept).
+    residual_ale: Optional[float] = None
+    p95: Optional[float] = None
+    accepted_scenario: Optional[str] = None
+    active_controls: Optional[Dict[str, bool]] = None
+    budget: Optional[float] = None
+    reason: Optional[str] = None
 
 
 class IngestParseRequest(BaseModel):
@@ -356,6 +375,156 @@ def get_topology(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/assets")
+def list_assets(
+    data_source: str = Query("predefined", description="'predefined' (demo fleet) or 'own' (Ingestion Engine fleet)."),
+    db: Session = Depends(get_db),
+):
+    """
+    Lightweight, data_source-scoped asset list ({id, name, business_unit,
+    data_classification, criticality_score, business_value}) - backs the
+    Attack Path panel's target-asset picker (see POST /api/attack-path).
+    GET /api/topology exists already but returns only an adjacency matrix
+    and bare asset IDs, not names, and isn't data_source-scoped at all -
+    this is the read the frontend actually needs for a human-readable
+    dropdown against the right dashboard's fleet.
+    """
+    if data_source == "own":
+        asset_scope = models.Asset.data_source == "own"
+    else:
+        asset_scope = (models.Asset.data_source == "predefined") | (models.Asset.data_source.is_(None))
+    assets = db.exec(select(models.Asset).where(asset_scope).order_by(models.Asset.business_value.desc())).all()
+    return {
+        "status": "success",
+        "data": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "business_unit": a.business_unit,
+                "data_classification": a.data_classification,
+                "criticality_score": a.criticality_score,
+                "business_value": a.business_value,
+                "is_public_facing": a.data_classification == "Public",
+            }
+            for a in assets
+        ],
+    }
+
+
+class AttackPathRequest(BaseModel):
+    target_asset_id: str
+    active_controls: Optional[Dict[str, bool]] = None
+    # Same convention as RiskSimRequest.data_source - which dashboard's
+    # fleet to traverse.
+    data_source: str = "predefined"
+
+
+@app.post("/api/attack-path")
+def get_attack_path(payload: AttackPathRequest, db: Session = Depends(get_db)):
+    """
+    Real graph traversal, not a scripted example: BFS over the actual
+    NetworkEdge topology (same edges GET /api/topology and
+    risk_engine.derive_fair_inputs' blast-radius calc both read) from every
+    internet-facing asset (data_classification == "Public") to the
+    requested target, plus a loss sub-range for that specific asset derived
+    from THIS run's real FAIR Monte Carlo output - never a fabricated
+    number.
+
+    [Public Exposure Hardening (WAF)] is what makes a path genuinely
+    disappear rather than just relabeling the same graph: when that control
+    is active in active_controls, public-facing assets are excluded from
+    the entry-point set entirely (the control's whole purpose - see
+    CONTROL_FRAMEWORK_MAP's "Perform Application Layer Filtering" mapping),
+    so BFS from a now-empty entry set correctly finds no path for any
+    target that was only reachable through one.
+    """
+    if payload.data_source == "own":
+        asset_scope = models.Asset.data_source == "own"
+    else:
+        asset_scope = (models.Asset.data_source == "predefined") | (models.Asset.data_source.is_(None))
+    assets = db.exec(select(models.Asset).where(asset_scope)).all()
+    if not assets:
+        raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
+
+    asset_by_id = {a.id: a for a in assets}
+    if payload.target_asset_id not in asset_by_id:
+        raise HTTPException(status_code=404, detail=f"Asset '{payload.target_asset_id}' not found in this data set.")
+
+    asset_ids = set(asset_by_id.keys())
+    adjacency: Dict[str, list] = {aid: [] for aid in asset_ids}
+    edges = db.exec(select(models.NetworkEdge)).all()
+    for edge in edges:
+        if edge.source_asset_id in asset_ids and edge.target_asset_id in asset_ids:
+            adjacency[edge.source_asset_id].append(edge.target_asset_id)
+            adjacency[edge.target_asset_id].append(edge.source_asset_id)
+
+    waf_active = bool((payload.active_controls or {}).get("Public Exposure Hardening (WAF)"))
+    entry_points = [] if waf_active else [a.id for a in assets if a.data_classification == "Public"]
+
+    # Multi-source BFS from every entry point at once, so the returned path
+    # is the shortest hop-count route from ANY internet-facing asset to the
+    # target - a real shortest-path search over the real graph, not a
+    # single hardcoded chain.
+    path_found = None
+    if payload.target_asset_id in entry_points:
+        path_found = [payload.target_asset_id]
+    elif entry_points:
+        from collections import deque
+        visited = set(entry_points)
+        parent: Dict[str, Optional[str]] = {aid: None for aid in entry_points}
+        queue = deque(entry_points)
+        while queue:
+            current = queue.popleft()
+            if current == payload.target_asset_id:
+                chain = [current]
+                while parent[chain[-1]] is not None:
+                    chain.append(parent[chain[-1]])
+                path_found = list(reversed(chain))
+                break
+            for neighbor in adjacency.get(current, []):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    parent[neighbor] = current
+                    queue.append(neighbor)
+
+    result: Dict[str, Any] = {
+        "target_asset_id": payload.target_asset_id,
+        "path_found": path_found is not None,
+        "blocked_by_waf": waf_active and any(a.data_classification == "Public" for a in assets),
+        "path": None,
+        "loss_range": None,
+    }
+    if path_found:
+        result["path"] = [
+            {"id": aid, "name": asset_by_id[aid].name, "business_unit": asset_by_id[aid].business_unit}
+            for aid in path_found
+        ]
+        result["hop_count"] = len(path_found) - 1
+
+        # Real loss sub-range: this specific run's actual mean/P95 ALE,
+        # scaled by the target asset's real share of total business value -
+        # the same proportional-allocation honesty as
+        # risk_engine.compute_business_unit_breakdown/compute_scenario_breakdown,
+        # not an invented range.
+        calibration = risk_engine.get_current_calibration(db)
+        inputs = risk_engine.derive_fair_inputs(
+            db, active_controls=payload.active_controls, calibration=calibration, data_source=payload.data_source,
+        )
+        if inputs:
+            inputs.pop("risk_drivers", None)
+            inputs.pop("calibration", None)
+            inputs.pop("provenance", None)
+            mc_results = quant_mc.run_fair_monte_carlo(**inputs)
+            total_value = sum(a.business_value for a in assets) or 1.0
+            target_share = asset_by_id[payload.target_asset_id].business_value / total_value
+            result["loss_range"] = {
+                "low": mc_results["mean_expected_loss"] * target_share,
+                "high": mc_results["var_95"] * target_share,
+            }
+
+    return {"status": "success", "data": result}
+
+
 @app.post("/api/simulate-risk")
 @limiter.limit("10/minute")
 def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depends(get_db)):
@@ -404,22 +573,39 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
     # show, on this run's real numbers, how much more risk reduction the
     # 0/1 knapsack optimizer extracts from the same rupee of budget.
     severity_opt_results = quant_opt.optimize_budget_severity_first(risk_engine.SECURITY_CONTROLS, payload.budget)
+    # [KEV/Threat-first benchmark] a second, distinct naive baseline -
+    # "patch whatever's actively exploited in the wild first" - alongside
+    # severity-first, so the Optimize page can show the real optimizer
+    # against BOTH common triage philosophies, not just one. See
+    # quant_opt.optimize_budget_kev_first and SECURITY_CONTROLS'
+    # kev_relevance field.
+    kev_opt_results = quant_opt.optimize_budget_kev_first(risk_engine.SECURITY_CONTROLS, payload.budget)
+
+    def _delta_pct(baseline: dict) -> Optional[float]:
+        baseline_total = baseline["total_risk_reduced"]
+        if baseline_total <= 0:
+            return None
+        return round((opt_results["total_risk_reduced"] - baseline_total) / baseline_total * 100.0, 1)
+
     optimizer_benchmark = {
         "optimal": opt_results,
         "severity_first": severity_opt_results,
+        "kev_first": kev_opt_results,
         "risk_reduction_delta": opt_results["total_risk_reduced"] - severity_opt_results["total_risk_reduced"],
-        "risk_reduction_delta_pct": (
-            round(
-                (opt_results["total_risk_reduced"] - severity_opt_results["total_risk_reduced"])
-                / severity_opt_results["total_risk_reduced"] * 100.0,
-                1,
-            )
-            if severity_opt_results["total_risk_reduced"] > 0
-            else None
-        ),
+        "risk_reduction_delta_pct": _delta_pct(severity_opt_results),
+        "kev_risk_reduction_delta": opt_results["total_risk_reduced"] - kev_opt_results["total_risk_reduced"],
+        "kev_risk_reduction_delta_pct": _delta_pct(kev_opt_results),
     }
     business_unit_breakdown = risk_engine.compute_business_unit_breakdown(
         db, mc_results["mean_expected_loss"], calibration=calibration, data_source=payload.data_source
+    )
+    # [Attack-scenario breakdown] Same real-simulated-total-allocated-by-
+    # real-signals shape as business_unit_breakdown above, but by named
+    # attack scenario (ransomware / data exfiltration / third-party) - see
+    # risk_engine.compute_scenario_breakdown's docstring for exactly how
+    # each asset is classified.
+    scenario_breakdown = risk_engine.compute_scenario_breakdown(
+        db, mc_results["mean_expected_loss"], mc_results["var_95"], data_source=payload.data_source
     )
 
     # [Closed-Loop Calibration Engine] a confidence band around this run's
@@ -475,6 +661,9 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
         # budget - powers the Optimize page's benchmark comparison card.
         "optimizer_benchmark": optimizer_benchmark,
         "business_unit_breakdown": business_unit_breakdown,
+        # [Attack-scenario breakdown] see risk_engine.compute_scenario_breakdown -
+        # real per-asset telemetry signals, not a scripted split.
+        "scenario_breakdown": scenario_breakdown,
         # [Explainable Risk Attribution] the named Control Strength/TEF
         # waterfall components behind this run's numbers - see
         # risk_engine.derive_fair_inputs' risk_drivers dict for what each
@@ -889,12 +1078,63 @@ def log_audit(
     opt in to putting it on-chain, rather than every acceptance racing to
     write to a chain nobody asked about yet.
     """
+    # [Risk Decision Passport] model_snapshot is the real backend app
+    # version (FastAPI's own app.version above), not an invented build tag.
+    # review_expiry is a fixed 90-day re-review window from decision time -
+    # a reasonable default cadence, not something the client controls.
+    model_snapshot = f"CRQ-FAIR-v{app.version}"
+    review_expiry = datetime.utcnow() + timedelta(days=90)
+
+    recommended_control_not_funded = None
+    evidence_hash = None
+    if request.active_controls is not None:
+        # What the real 0/1 knapsack optimizer would recommend for the
+        # same budget actually being spent (active_controls' own cost sum,
+        # if no explicit budget was sent) - the first recommended control
+        # NOT in active_controls is what's genuinely being left unfunded,
+        # not a placeholder.
+        budget_for_check = request.budget
+        if budget_for_check is None:
+            budget_for_check = sum(
+                c["cost"] for c in risk_engine.SECURITY_CONTROLS
+                if request.active_controls.get(c["id"])
+            )
+        if budget_for_check:
+            opt = quant_opt.optimize_budget(risk_engine.SECURITY_CONTROLS, budget_for_check)
+            for control_id in opt.get("selected_patches", []):
+                if not request.active_controls.get(control_id):
+                    recommended_control_not_funded = control_id
+                    break
+
+        # Evidence hash: a real SHA-256 over this decision's actual
+        # evidence trail (asset/telemetry counts, freshness, FAIR input
+        # ranges - see risk_engine.derive_fair_inputs' provenance dict),
+        # not a random or client-supplied string - "prove exactly what
+        # information was in front of management" means the hash has to
+        # be independently reproducible from the real state at decision
+        # time, computed server-side.
+        calibration = risk_engine.get_current_calibration(db)
+        inputs_for_hash = risk_engine.derive_fair_inputs(
+            db, active_controls=request.active_controls, calibration=calibration, data_source=request.data_source,
+        )
+        if inputs_for_hash and inputs_for_hash.get("provenance"):
+            evidence_payload = json.dumps(inputs_for_hash["provenance"], sort_keys=True, default=str)
+            evidence_hash = hashlib.sha256(evidence_payload.encode("utf-8")).hexdigest()
+
     decision = models.RiskDecision(
         action=request.action,
         risk_accepted=request.risk_accepted,
         decided_by=current_user,
         board_approved=request.board_approved,
         data_source=request.data_source,
+        model_snapshot=model_snapshot,
+        residual_ale=request.residual_ale,
+        p95=request.p95,
+        accepted_scenario=request.accepted_scenario,
+        recommended_control_not_funded=recommended_control_not_funded,
+        reason=request.reason,
+        evidence_hash=evidence_hash,
+        review_expiry=review_expiry,
     )
     db.add(decision)
     db.commit()
@@ -908,6 +1148,10 @@ def log_audit(
         "decided_by": current_user,
         "board_approved": request.board_approved,
         "data_source": decision.data_source,
+        "model_snapshot": decision.model_snapshot,
+        "recommended_control_not_funded": decision.recommended_control_not_funded,
+        "evidence_hash": decision.evidence_hash,
+        "review_expiry": decision.review_expiry.isoformat() if decision.review_expiry else None,
     }
 
 

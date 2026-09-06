@@ -96,3 +96,40 @@ def optimize_budget_severity_first(patches: List[Dict[str, Any]], budget: float)
         "total_cost": float(total_cost),
         "total_risk_reduced": float(total_risk_reduced),
     }
+
+
+def optimize_budget_kev_first(patches: List[Dict[str, Any]], budget: float) -> dict:
+    """
+    A second baseline alongside optimize_budget_severity_first: greedily
+    funds patches by kev_relevance (see risk_engine.SECURITY_CONTROLS'
+    "kev_relevance" field) - "patch whatever's actively being exploited in
+    the wild first" - instead of raw CVSS severity or cost-efficiency.
+    This is a distinct triage philosophy from severity-first in practice
+    (a control can score high on one and low on the other - see
+    SECURITY_CONTROLS' comment), so the two baselines genuinely diverge
+    rather than reproducing the same ranking under a different name.
+
+    Same shape/contract as optimize_budget_severity_first - see that
+    function's docstring for the args/return details, which apply
+    identically here with kev_relevance in place of severity.
+    """
+    ranked = sorted(patches, key=lambda p: p.get("kev_relevance", 0), reverse=True)
+
+    selected_patches: List[str] = []
+    total_cost = 0.0
+    total_risk_reduced = 0.0
+    remaining = budget
+
+    for p in ranked:
+        if p["cost"] <= remaining:
+            selected_patches.append(p["id"])
+            total_cost += p["cost"]
+            total_risk_reduced += p["risk_reduction"]
+            remaining -= p["cost"]
+
+    return {
+        "status": "Optimal" if selected_patches or not patches else "Infeasible",
+        "selected_patches": selected_patches,
+        "total_cost": float(total_cost),
+        "total_risk_reduced": float(total_risk_reduced),
+    }

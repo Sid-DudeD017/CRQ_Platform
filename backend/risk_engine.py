@@ -53,20 +53,31 @@ from . import generators, models
 # Exploited Vulnerabilities catalog; 24/7 SOC Monitoring scores low
 # because it's a detective control, not something that closes an
 # exploitable vulnerability on its own.
+# [KEV/Threat-first benchmark] kev_relevance is a SEPARATE 0-10 score from
+# severity above - severity is "how bad is this CVSS-style impact",
+# kev_relevance is "how directly does this control address actively-
+# exploited (CISA KEV) vulnerabilities and live threat intel" - a control
+# can be high on one and low on the other (e.g. PII Data Minimization is a
+# meaningful compliance control but does nothing against an actively-
+# exploited CVE; Threat Intel & KEV Patch Program is almost entirely about
+# exactly that). Deliberately assigned so KEV-first and severity-first
+# greedy orderings diverge in practice - see
+# quant_opt.optimize_budget_kev_first and backend/main.py::simulate_risk's
+# three-way optimizer_benchmark (optimal / severity_first / kev_first).
 SECURITY_CONTROLS = [
-    {"id": "Enforce Cloud MFA", "cost": 400000, "risk_reduction": 1400000, "severity": 7.5},
-    {"id": "Patch Payment Gateway", "cost": 1000000, "risk_reduction": 1800000, "severity": 9.8},
-    {"id": "Zero Trust Architecture", "cost": 1600000, "risk_reduction": 2200000, "severity": 6.5},
+    {"id": "Enforce Cloud MFA", "cost": 400000, "risk_reduction": 1400000, "severity": 7.5, "kev_relevance": 6.0},
+    {"id": "Patch Payment Gateway", "cost": 1000000, "risk_reduction": 1800000, "severity": 9.8, "kev_relevance": 9.5},
+    {"id": "Zero Trust Architecture", "cost": 1600000, "risk_reduction": 2200000, "severity": 6.5, "kev_relevance": 5.0},
     # --- 8 additional controls, each wired to its own real FAIR input term
     # in derive_fair_inputs below (never a UI-only toggle) ---
-    {"id": "Least-Privilege IAM Review", "cost": 200000, "risk_reduction": 600000, "severity": 5.5},
-    {"id": "EDR Health Remediation", "cost": 500000, "risk_reduction": 1200000, "severity": 6.0},
-    {"id": "Host Isolation & Incident Containment", "cost": 800000, "risk_reduction": 1900000, "severity": 5.0},
-    {"id": "Public Exposure Hardening (WAF)", "cost": 700000, "risk_reduction": 1600000, "severity": 8.5},
-    {"id": "CSPM Auto-Remediation", "cost": 500000, "risk_reduction": 1100000, "severity": 6.5},
-    {"id": "Threat Intel & KEV Patch Program", "cost": 800000, "risk_reduction": 1400000, "severity": 9.0},
-    {"id": "24/7 SOC Monitoring", "cost": 900000, "risk_reduction": 1500000, "severity": 4.5},
-    {"id": "PII Data Minimization & Tokenization", "cost": 1000000, "risk_reduction": 1300000, "severity": 5.5},
+    {"id": "Least-Privilege IAM Review", "cost": 200000, "risk_reduction": 600000, "severity": 5.5, "kev_relevance": 4.0},
+    {"id": "EDR Health Remediation", "cost": 500000, "risk_reduction": 1200000, "severity": 6.0, "kev_relevance": 7.0},
+    {"id": "Host Isolation & Incident Containment", "cost": 800000, "risk_reduction": 1900000, "severity": 5.0, "kev_relevance": 6.5},
+    {"id": "Public Exposure Hardening (WAF)", "cost": 700000, "risk_reduction": 1600000, "severity": 8.5, "kev_relevance": 7.5},
+    {"id": "CSPM Auto-Remediation", "cost": 500000, "risk_reduction": 1100000, "severity": 6.5, "kev_relevance": 5.5},
+    {"id": "Threat Intel & KEV Patch Program", "cost": 800000, "risk_reduction": 1400000, "severity": 9.0, "kev_relevance": 10.0},
+    {"id": "24/7 SOC Monitoring", "cost": 900000, "risk_reduction": 1500000, "severity": 4.5, "kev_relevance": 5.0},
+    {"id": "PII Data Minimization & Tokenization", "cost": 1000000, "risk_reduction": 1300000, "severity": 5.5, "kev_relevance": 3.0},
 ]
 
 # [ISO/IEC 27001 & CIS Controls v8 mapping] The SIH problem statement
@@ -813,6 +824,41 @@ def derive_fair_inputs(
     # ai-agent/tools.py::run_monte_carlo_var) before spreading the rest of
     # this dict into run_fair_monte_carlo.
     latest_telemetry_at = max((log.timestamp for log in latest_logs), default=None)
+
+    _fair_inputs_for_provenance = {
+        "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
+        "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
+        "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
+        "plm_min": (base_plm * 0.5) / loss_variance_multiplier, "plm_mode": base_plm, "plm_max": (base_plm * 2.0) * loss_variance_multiplier,
+        "slm_min": (base_slm * 0.5) / loss_variance_multiplier, "slm_mode": base_slm, "slm_max": (base_slm * 2.0) * loss_variance_multiplier,
+    }
+
+    # [Evidence/provenance trail: model confidence + top uncertainty driver]
+    # model_confidence reads directly off the Closed-Loop Calibration
+    # Engine's uncertainty_score (see compute_calibration - 100 is "no real
+    # incidents logged yet, maximally uncertain", falling as real outcomes
+    # accumulate) rather than a separate invented confidence metric.
+    # top_uncertainty_driver picks whichever of the five FAIR triangular
+    # inputs has the widest range relative to its own mode (max-min)/mode -
+    # i.e. which input this specific run's ALE/VaR spread is most sensitive
+    # to - computed directly from the same ranges above, not asserted.
+    _uncertainty_score = (calibration or {}).get("uncertainty_score", 100.0)
+    if _uncertainty_score < 30.0:
+        _model_confidence = "High"
+    elif _uncertainty_score < 70.0:
+        _model_confidence = "Medium"
+    else:
+        _model_confidence = "Low"
+
+    _input_labels = {"tef": "Threat Event Frequency", "tc": "Threat Capability", "cs": "Control Strength", "plm": "Primary Loss Magnitude", "slm": "Secondary Loss Magnitude"}
+    _widest_key, _widest_ratio = None, -1.0
+    for _prefix, _label in _input_labels.items():
+        _mode = _fair_inputs_for_provenance[f"{_prefix}_mode"]
+        _range = _fair_inputs_for_provenance[f"{_prefix}_max"] - _fair_inputs_for_provenance[f"{_prefix}_min"]
+        _ratio = _range / _mode if _mode else 0.0
+        if _ratio > _widest_ratio:
+            _widest_key, _widest_ratio = _label, _ratio
+
     provenance = {
         "data_source": data_source,
         "asset_count": len(assets),
@@ -823,13 +869,10 @@ def derive_fair_inputs(
         # (quant-engine/monte_carlo.py) - no caller anywhere overrides it,
         # so this is always the actual iteration count used, not a guess.
         "num_simulations": 10000,
-        "fair_inputs": {
-            "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
-            "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
-            "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
-            "plm_min": (base_plm * 0.5) / loss_variance_multiplier, "plm_mode": base_plm, "plm_max": (base_plm * 2.0) * loss_variance_multiplier,
-            "slm_min": (base_slm * 0.5) / loss_variance_multiplier, "slm_mode": base_slm, "slm_max": (base_slm * 2.0) * loss_variance_multiplier,
-        },
+        "model_confidence": _model_confidence,
+        "calibration_uncertainty_score": _uncertainty_score,
+        "top_uncertainty_driver": _widest_key,
+        "fair_inputs": _fair_inputs_for_provenance,
     }
 
     return {
@@ -843,6 +886,123 @@ def derive_fair_inputs(
         "calibration": calibration,
         "provenance": provenance,
     }
+
+
+def compute_scenario_breakdown(
+    db: Session,
+    mean_expected_loss: float,
+    var_95: float,
+    data_source: str = "predefined",
+) -> Dict[str, Any]:
+    """
+    Splits this run's simulated ALE/VaR across three named attack scenarios
+    - ransomware/endpoint compromise, data exfiltration, third-party/other
+    - by classifying each real asset from its actual latest telemetry
+    signals, then allocating in proportion to the classified assets' share
+    of total business_value. Same honest-approximation shape as
+    compute_business_unit_breakdown above: it does not run three separate
+    Monte Carlo simulations per scenario, it allocates the one real
+    simulated total by which assets actually show which kind of exposure -
+    every percentage and rupee figure here traces back to real
+    TelemetryLog/Asset rows for this run, never a fixed or invented split.
+
+    Classification per asset (highest-scoring bucket wins; a "clean" asset
+    with none of these signals lands in third_party_or_other):
+    - ransomware: host_compromise_flags, active malware_alerts_24h, or EDR
+      reported Offline - endpoint-compromise indicators.
+    - data_exfiltration: PII/PCI/Critical data_classification, anomalous
+      access flags, excessive permissions, or public exposure - indicators
+      an attacker could reach and remove sensitive data.
+    """
+    if data_source == "own":
+        asset_scope = models.Asset.data_source == "own"
+        log_scope = models.TelemetryLog.data_source == "own"
+    else:
+        asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
+        log_scope = or_(models.TelemetryLog.data_source == "predefined", models.TelemetryLog.data_source.is_(None))
+
+    assets = db.exec(select(models.Asset).where(asset_scope)).all()
+    if not assets:
+        return {"scenarios": [], "asset_count": 0}
+
+    # Ascending timestamp so a later (newer) row for the same asset_id
+    # overwrites an earlier one in log_by_asset below - i.e. always the
+    # most recent telemetry per asset, not whichever happened to sort last.
+    logs = db.exec(
+        select(models.TelemetryLog).where(log_scope).order_by(models.TelemetryLog.timestamp.asc())
+    ).all()
+    log_by_asset: Dict[str, Any] = {}
+    for log in logs:
+        log_by_asset[log.asset_id] = log
+
+    total_value = sum(a.business_value for a in assets) or 1.0
+    exfil_classifications = {"PII", "PCI", "Critical"}
+
+    buckets: Dict[str, Dict[str, Any]] = {
+        "ransomware": {"business_value": 0.0, "asset_count": 0, "signals": set()},
+        "data_exfiltration": {"business_value": 0.0, "asset_count": 0, "signals": set()},
+        "third_party_or_other": {"business_value": 0.0, "asset_count": 0, "signals": set()},
+    }
+
+    for asset in assets:
+        log = log_by_asset.get(asset.id)
+        ransomware_score = 0
+        exfil_score = 0
+        signals: list = []
+
+        if log:
+            if log.host_compromise_flags:
+                ransomware_score += 1
+                signals.append("host compromise flag")
+            if (log.malware_alerts_24h or 0) > 0:
+                ransomware_score += 1
+                signals.append("active malware alerts")
+            if log.edr_health_status == "Offline":
+                ransomware_score += 1
+                signals.append("EDR offline")
+            if log.public_exposure_flag:
+                exfil_score += 1
+                signals.append("publicly exposed")
+            if (log.anomalous_access_flags or 0) > 0:
+                exfil_score += 1
+                signals.append("anomalous access")
+            if log.excessive_permissions:
+                exfil_score += 1
+                signals.append("excessive permissions")
+        if asset.data_classification in exfil_classifications:
+            exfil_score += 1
+            signals.append(f"{asset.data_classification} data")
+
+        if ransomware_score == 0 and exfil_score == 0:
+            bucket_key = "third_party_or_other"
+        elif ransomware_score >= exfil_score:
+            bucket_key = "ransomware"
+        else:
+            bucket_key = "data_exfiltration"
+
+        bucket = buckets[bucket_key]
+        bucket["business_value"] += asset.business_value
+        bucket["asset_count"] += 1
+        bucket["signals"].update(signals)
+
+    labels = {
+        "ransomware": "Ransomware / endpoint compromise",
+        "data_exfiltration": "Data exfiltration",
+        "third_party_or_other": "Third-party / other",
+    }
+    scenarios = []
+    for key, bucket in buckets.items():
+        share = bucket["business_value"] / total_value
+        scenarios.append({
+            "scenario": labels[key],
+            "share_pct": round(share * 100.0, 1),
+            "allocated_mean_loss": mean_expected_loss * share,
+            "allocated_var_95": var_95 * share,
+            "asset_count": bucket["asset_count"],
+            "supporting_signals": sorted(bucket["signals"])[:5],
+        })
+    scenarios.sort(key=lambda s: s["share_pct"], reverse=True)
+    return {"scenarios": scenarios, "asset_count": len(assets)}
 
 
 def compute_business_unit_breakdown(

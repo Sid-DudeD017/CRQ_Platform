@@ -418,6 +418,15 @@ export default function ExecutiveDashboard() {
                     action: `Accept residual risk: ${label}`,
                     risk_accepted: riskAmountRupees,
                     data_source: 'predefined',
+                    // [Risk Decision Passport] the same real numbers already
+                    // on screen right now - see backend/main.py::log_audit,
+                    // which computes the evidence hash/unfunded-control
+                    // comparison from active_controls/budget server-side.
+                    residual_ale: simResults?.monte_carlo?.mean_expected_loss ?? null,
+                    p95: simResults?.monte_carlo?.var_95 ?? null,
+                    accepted_scenario: simResults?.scenario_breakdown?.scenarios?.[0]?.scenario ?? null,
+                    active_controls: controls,
+                    budget: (budget / 100) * 10000000,
                 }),
             });
             const data = await res.json();
@@ -459,6 +468,18 @@ export default function ExecutiveDashboard() {
                     risk_accepted: simResults.optimization.total_cost || 0,
                     board_approved: true,
                     data_source: 'predefined',
+                    residual_ale: simResults?.monte_carlo?.mean_expected_loss ?? null,
+                    p95: simResults?.monte_carlo?.var_95 ?? null,
+                    accepted_scenario: simResults?.scenario_breakdown?.scenarios?.[0]?.scenario ?? null,
+                    // The plan actually being approved here is the
+                    // optimizer's own recommendation, not whatever the
+                    // sandbox sliders currently show - so the passport's
+                    // "recommended control not funded" comparison is
+                    // against what THIS approval actually funds.
+                    active_controls: Object.fromEntries(
+                        (simResults.optimization.selected_patches || []).map((id: string) => [id, true])
+                    ),
+                    budget: simResults.optimization.total_cost || (budget / 100) * 10000000,
                 }),
             });
             const data = await res.json();
