@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { useToast } from './ToastContext';
 
@@ -20,6 +20,8 @@ interface AuthContextValue {
     token: string | null;
     username: string | null;
     loginAs: (role: DemoRole) => Promise<void>;
+    login: (email: string, password: string) => Promise<void>;
+    signup: (email: string, password: string, name?: string) => Promise<void>;
     logout: () => void;
     loginError: string | null;
     loggingInRole: DemoRole | null;
@@ -41,6 +43,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setToken(savedToken);
             setUsername(savedUser);
         }
+    }, []);
+
+    // Guards against showing the "session expired" toast more than once
+    // for a single expiry (fetchWithRetry dispatches the event on every
+    // 401 it sees, and several requests can 401 around the same time).
+    // Reset to false whenever a fresh login/signup succeeds below.
+    const sessionExpiredRef = useRef(false);
+
+    // fetchWithRetry (lib/api.ts) dispatches this on any 401 response,
+    // which means the backend rejected the stored token as invalid or
+    // expired. Force a clean logout instead of leaving the app in a state
+    // where every subsequent request silently fails with 401.
+    useEffect(() => {
+        const handleSessionExpired = () => {
+            if (sessionExpiredRef.current) return;
+            sessionExpiredRef.current = true;
+            setToken(null);
+            setUsername(null);
+            setLoginError(null);
+            localStorage.removeItem('crq_token');
+            localStorage.removeItem('crq_user');
+            showToast('Your session expired - please log in again.', 'error');
+        };
+        window.addEventListener('crq:session-expired', handleSessionExpired);
+        return () => window.removeEventListener('crq:session-expired', handleSessionExpired);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const loginAs = async (role: DemoRole) => {
@@ -68,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUsername(creds.username);
             localStorage.setItem('crq_token', data.access_token);
             localStorage.setItem('crq_user', creds.username);
+            sessionExpiredRef.current = false;
             showToast(`Logged in as ${creds.username.toUpperCase()}.`, 'success');
         } catch (e: any) {
             console.error('Login error:', e);
@@ -77,6 +106,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
             setLoggingInRole(null);
         }
+    };
+
+    // Real, persisted-account login - checks backend/main.py's
+    // /api/auth/login, which now falls back to the User table (created via
+    // signup() below) when the credentials aren't one of the two demo
+    // accounts. Throws on failure so the caller (AuthScreen) can show the
+    // real error message inline instead of this context guessing a UI.
+    const login = async (email: string, password: string) => {
+        const body = new URLSearchParams();
+        body.append('username', email.trim());
+        body.append('password', password);
+        body.append('grant_type', 'password');
+
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.detail || `Login failed (${res.status})`);
+        }
+        const resolvedUser = data.email || email.trim();
+        setToken(data.access_token);
+        setUsername(resolvedUser);
+        localStorage.setItem('crq_token', data.access_token);
+        localStorage.setItem('crq_user', resolvedUser);
+        sessionExpiredRef.current = false;
+        showToast(`Welcome back${data.name ? ', ' + data.name : ''}.`, 'success');
+    };
+
+    // Creates a real account via POST /api/auth/signup (persisted in the
+    // backend's User table - see backend/models.py) and logs it straight
+    // in, since the backend returns an access token on successful signup.
+    const signup = async (email: string, password: string, name?: string) => {
+        const res = await fetch(`${API_BASE}/api/auth/signup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.trim(), password, name: name || null }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.detail || `Sign up failed (${res.status})`);
+        }
+        const resolvedUser = data.email || email.trim();
+        setToken(data.access_token);
+        setUsername(resolvedUser);
+        localStorage.setItem('crq_token', data.access_token);
+        localStorage.setItem('crq_user', resolvedUser);
+        sessionExpiredRef.current = false;
+        showToast(`Account created${data.name ? ', welcome ' + data.name : ''}.`, 'success');
     };
 
     const logout = () => {
@@ -89,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ token, username, loginAs, logout, loginError, loggingInRole }}>
+        <AuthContext.Provider value={{ token, username, loginAs, login, signup, logout, loginError, loggingInRole }}>
             {children}
         </AuthContext.Provider>
     );

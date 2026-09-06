@@ -15,6 +15,7 @@ with how the rest of this specific folder already reads configuration.
 import os
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -35,6 +36,19 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 def authenticate_demo_user(username: str, password: str) -> bool:
     return DEMO_USERS.get(username) == password
+
+
+def hash_password(password: str) -> str:
+    """bcrypt-hash a plaintext password for storage in User.hashed_password."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Constant-time compare of a login attempt against a stored bcrypt hash."""
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def create_access_token(subject: str) -> str:

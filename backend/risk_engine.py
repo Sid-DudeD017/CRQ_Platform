@@ -15,9 +15,10 @@ for the same live telemetry.
 """
 from typing import Any, Dict, Optional
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
-from . import models
+from . import generators, models
 
 # Named to match the "Strategic Controls" toggles on the dashboard
 # (frontend/src/app/page.tsx and frontend/src/app/optimize/page.tsx)
@@ -405,6 +406,7 @@ def derive_fair_inputs(
     dpdp_override: Optional[bool] = None,
     active_controls: Optional[Dict[str, bool]] = None,
     calibration: Optional[Dict[str, Any]] = None,
+    data_source: str = "predefined",
 ) -> Optional[Dict[str, Any]]:
     """
     Reads live assets/telemetry/topology and derives the FAIR Monte Carlo
@@ -446,8 +448,39 @@ def derive_fair_inputs(
     org-wide Training page completion (see TrainingRecord and
     TRAINING_MODULE_IDS) applies a flat, always-on Control Strength boost -
     see the comment above `training_records` below.
+
+    data_source: 'predefined' (demo Overview) or 'own' (Ingestion Engine) -
+    scopes which Asset/TelemetryLog/IngestedMapping rows this run reads.
+    Previously this function always read every Asset/TelemetryLog row in
+    the database with no such dimension at all, so the demo dashboard and
+    the "enter your own data" dashboard were silently simulating off the
+    exact same global pool - uploading and confirming your own config only
+    ever nudged a small capped deduction on top of someone else's
+    telemetry, never actually replaced it. 'predefined' matches rows
+    tagged 'predefined' OR left NULL (pre-migration legacy rows); 'own'
+    matches only rows explicitly tagged 'own', and lazily seeds a small
+    fixed starter fleet (see generators.ensure_own_data_baseline) the
+    first time it's requested and none exists yet, so a brand-new
+    own-data account gets a real simulation instead of a "no assets
+    found" error before uploading anything. Training coverage and the
+    Closed-Loop Calibration Engine remain intentionally org-wide/shared
+    across both modes - a trained workforce and real incident history are
+    genuine organizational facts, not per-dashboard what-ifs.
     """
-    assets = db.exec(select(models.Asset)).all()
+    if data_source == "own":
+        generators.ensure_own_data_baseline(db)
+        asset_scope = models.Asset.data_source == "own"
+        log_scope = models.TelemetryLog.data_source == "own"
+        mapping_scope = models.IngestedMapping.data_source == "own"
+    else:
+        asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
+        log_scope = or_(models.TelemetryLog.data_source == "predefined", models.TelemetryLog.data_source.is_(None))
+        # No confirmed mapping is ever tagged 'predefined' - the Ingestion
+        # Engine only exists on the own-data dashboard - so the demo
+        # dashboard's gap_deduction is always 0, as it should be.
+        mapping_scope = models.IngestedMapping.data_source == "predefined"
+
+    assets = db.exec(select(models.Asset).where(asset_scope)).all()
     if not assets:
         return None
 
@@ -497,7 +530,10 @@ def derive_fair_inputs(
     total_business_value = sum(a.business_value for a in assets)
 
     latest_logs = db.exec(
-        select(models.TelemetryLog).order_by(models.TelemetryLog.timestamp.desc()).limit(len(assets))
+        select(models.TelemetryLog)
+        .where(log_scope)
+        .order_by(models.TelemetryLog.timestamp.desc())
+        .limit(len(assets))
     ).all() or []
 
     # TEF (Threat Event Frequency) - "how many threat events per year
@@ -567,7 +603,24 @@ def derive_fair_inputs(
 
     v_eff = [0.0] * n
     for i in range(n):
-        neighbor_sum = sum(matrix[i][j] * v_intrinsic[j] for j in range(n))
+        # [Blast Radius fix] This used to SUM every neighbor's weighted
+        # vulnerability rather than average it - with this mock network
+        # averaging ~7 connections per asset, that sum routinely blew past
+        # the eventual clamp below regardless of posture, saturating
+        # nearly every asset's effective vulnerability to its ceiling no
+        # matter which Strategic Controls were active. Dividing by total
+        # neighbor edge weight turns this back into "how vulnerable are my
+        # neighbors, weighted by connection strength" (comparable to
+        # v_intrinsic's own 0-10 scale) instead of "how many neighbors do I
+        # have times their vulnerability" - which is what let Control
+        # Strength (and therefore the Simulation Sandbox toggles) move the
+        # simulated risk at all, instead of being floored near its minimum
+        # on almost every run.
+        neighbor_weight_total = sum(matrix[i][j] for j in range(n))
+        neighbor_sum = (
+            sum(matrix[i][j] * v_intrinsic[j] for j in range(n)) / neighbor_weight_total
+            if neighbor_weight_total > 0 else 0.0
+        )
         # Clamped to 10 - v_intrinsic is a 0-10 vulnerability_score (see
         # TelemetryLog.vulnerability_score), and blast-radius amplification
         # is meant to push a well-connected asset's *effective*
@@ -647,7 +700,7 @@ def derive_fair_inputs(
     # telemetry-driven weakness to hit the floor. This is what makes the
     # Ingestion Engine's "Confirm Mapping" action visibly move the
     # dashboard's ALE instead of just recording a mapping nobody uses.
-    confirmed_mappings = db.exec(select(models.IngestedMapping)).all()
+    confirmed_mappings = db.exec(select(models.IngestedMapping).where(mapping_scope)).all()
     gap_severity_weight = {"critical": 8.0, "warning": 4.0}
     gap_deduction = min(30.0, sum(
         gap_severity_weight.get(m.severity, 2.0) * m.confidence
@@ -687,6 +740,7 @@ def derive_fair_inputs(
     # so an ALE swing can be attributed to "more of the fleet reported
     # CRITICAL alerts" instead of just "risk went up."
     risk_drivers = {
+        "data_source": data_source,
         "cs_upstream": round(avg_cs_upstream, 2),
         "avg_effective_vulnerability": round(avg_vulnerability, 2),
         "telemetry_deduction": round(telemetry_deduction, 2),
@@ -749,6 +803,7 @@ def compute_business_unit_breakdown(
     db: Session,
     total_ale: float,
     calibration: Optional[Dict[str, Any]] = None,
+    data_source: str = "predefined",
 ) -> list:
     """
     Allocates the simulation's total Annualized Loss Expectancy across real
@@ -775,7 +830,15 @@ def compute_business_unit_breakdown(
     a unit that's proven costlier than its asset value alone predicted gets
     a larger slice of the same pie, not a bigger pie.
     """
-    assets = db.exec(select(models.Asset)).all()
+    # [Own-Data / Demo isolation] Same data_source scoping as
+    # derive_fair_inputs, so the "Risk by Business Unit" panel allocates
+    # against the right fleet - own-data mode's business units, not
+    # whatever happens to be in the shared demo pool.
+    if data_source == "own":
+        asset_scope = models.Asset.data_source == "own"
+    else:
+        asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
+    assets = db.exec(select(models.Asset).where(asset_scope)).all()
     if not assets:
         return []
 

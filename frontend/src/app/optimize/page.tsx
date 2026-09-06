@@ -64,14 +64,63 @@ const KPI_ICONS = {
     residual: 'shield',
 } as const;
 
+// A small numbered badge + title + one-line "why" caption, reused for
+// every step below so the page reads as a guided sequence (set your
+// budget, then pick controls, then see the impact, then log the
+// decision) instead of a wall of unrelated cards.
+function StepHeader({ step, title, why }: { step: number; title: string; why: string }) {
+    return (
+        <div className="flex items-start gap-stack-sm mb-stack-md">
+            <span className="w-7 h-7 rounded-full landing-cta-gradient flex items-center justify-center font-data-mono text-[13px] font-bold shrink-0 mt-0.5">
+                {step}
+            </span>
+            <div>
+                <h3 className="font-title-lg text-title-lg text-primary leading-tight">{title}</h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">{why}</p>
+            </div>
+        </div>
+    );
+}
+
 export default function OptimizePage() {
-    const { token } = useAuth();
+    const { token, username } = useAuth();
     const { showToast } = useToast();
     const [budgetPct, setBudgetPct] = useState(15); // ~₹15L - just past MFA + Payment Gateway combined
     const [result, setResult] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isApproving, setIsApproving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // [Own-data investment planning] Demo keeps the fully automatic
+    // knapsack pick (it's a "watch the algorithm work" demo). Own Data
+    // instead hands the wheel to the user - the whole point of ingesting
+    // your real environment is deciding what YOU want to invest in next,
+    // not having an algorithm decide silently. Read the same
+    // hydration-safe way every other page reads it
+    // (crq_data_source:<username>).
+    const [dataSourceHydrated, setDataSourceHydrated] = useState(false);
+    const [dataSource, setDataSource] = useState<'predefined' | 'own'>('predefined');
+    useEffect(() => {
+        if (!username) {
+            setDataSourceHydrated(true);
+            return;
+        }
+        try {
+            const stored = localStorage.getItem(`crq_data_source:${username}`);
+            setDataSource(stored === 'own' ? 'own' : 'predefined');
+        } catch (e) {
+            // localStorage unavailable - fall back to the automatic demo flow.
+        }
+        setDataSourceHydrated(true);
+    }, [username]);
+    const isOwn = dataSource === 'own';
+
+    // Own-data mode's manual picks - which patch ids the user has checked
+    // themselves. Unused (and untouched) in demo mode.
+    const [manualSelected, setManualSelected] = useState<Record<string, boolean>>({});
+    const togglePatch = (id: string) => {
+        setManualSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+    };
 
     const budgetValue = (budgetPct / 100) * MAX_BUDGET;
     const requestIdRef = useRef(0);
@@ -106,13 +155,37 @@ export default function OptimizePage() {
     }, []);
 
     const optimization = result?.optimization;
-    const selected: string[] = optimization?.selected_patches || [];
-    const totalRiskReduced = optimization?.total_risk_reduced || 0;
+    const autoSelected: string[] = optimization?.selected_patches || [];
+    const manualSelectedIds: string[] = PATCHES.filter((p) => manualSelected[p.id]).map((p) => p.id);
+    const manualCost = PATCHES.filter((p) => manualSelected[p.id]).reduce((sum, p) => sum + p.cost, 0);
+    const manualRiskReduced = PATCHES.filter((p) => manualSelected[p.id]).reduce((sum, p) => sum + p.risk_reduction, 0);
+
+    // Everything downstream (KPIs, the "Your plan" chart marker, the
+    // approve action) reads from `selected`/`totalCost`/`totalRiskReduced`
+    // so demo vs. own-data only has to branch once, right here.
+    const selected: string[] = isOwn ? manualSelectedIds : autoSelected;
+    const totalCost = isOwn ? manualCost : (optimization?.total_cost || 0);
+    const totalRiskReduced = isOwn ? manualRiskReduced : (optimization?.total_risk_reduced || 0);
     const meanExpectedLoss = result?.monte_carlo?.mean_expected_loss || 0;
     const residual = Math.max(meanExpectedLoss - totalRiskReduced, 0);
+    const overBudget = isOwn && manualCost > budgetValue;
+
+    const useRecommendedMix = () => {
+        const next: Record<string, boolean> = {};
+        autoSelected.forEach((id) => { next[id] = true; });
+        setManualSelected(next);
+        showToast(`Copied the optimizer's ${autoSelected.length}-control recommendation - feel free to adjust it from here.`, 'info');
+    };
 
     const approveOptimizer = async () => {
-        if (!optimization) return;
+        if (isOwn) {
+            if (selected.length === 0) {
+                showToast('Choose at least one control above before approving a plan.', 'error');
+                return;
+            }
+        } else if (!optimization) {
+            return;
+        }
         if (!token) {
             showToast('Please log in first (top-right corner) before approving the plan.', 'error');
             return;
@@ -126,9 +199,12 @@ export default function OptimizePage() {
                     'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    action: `Approve AI Optimization Plan: ${selected.join(', ')}`,
-                    risk_accepted: optimization.total_cost || 0,
+                    action: isOwn
+                        ? `Approve self-selected investment plan: ${selected.join(', ')}`
+                        : `Approve AI Optimization Plan: ${selected.join(', ')}`,
+                    risk_accepted: totalCost || 0,
                     board_approved: true,
+                    data_source: dataSource,
                 }),
             });
             const data = await res.json();
@@ -136,7 +212,7 @@ export default function OptimizePage() {
                 showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
                 return;
             }
-            showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
+            showToast(`${isOwn ? 'Investment plan' : 'Optimization plan'} approved and logged. Decision #${data.decision_id}.`, 'success');
         } catch (e) {
             console.error(e);
             showToast('Error contacting backend. Is it running?', 'error');
@@ -148,25 +224,22 @@ export default function OptimizePage() {
     return (
         <div className="flex flex-col gap-stack-lg">
             {/* Header */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-stack-md">
-                <div>
-                    <h2 className="font-headline-md text-headline-md text-primary mb-unit">Investment Optimizer</h2>
-                    <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-                        Live knapsack allocation from the real simulate-risk optimizer - drag the budget to see which controls the model actually selects.
-                    </p>
-                </div>
-                <button
-                    onClick={approveOptimizer}
-                    disabled={!optimization || isApproving}
-                    className="bg-primary text-on-primary py-2 px-4 rounded-lg font-body-md text-body-md hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
-                >
-                    <span className="material-symbols-outlined text-sm">lock</span>
-                    {isApproving ? 'Logging...' : 'Approve & Log to Ledger'}
-                </button>
+            <div>
+                <h2 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-unit">Investment Optimizer</h2>
+                <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
+                    {isOwn
+                        ? "A four-step walkthrough for deciding what to invest in next, calibrated on your own ingested data - you pick the controls, we show you the math."
+                        : 'A four-step walkthrough of the live knapsack optimizer - drag the budget to see which controls the model picks and why.'}
+                </p>
             </div>
 
-            {/* Budget slider */}
+            {/* Step 1: Budget */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <StepHeader
+                    step={1}
+                    title="Set Your Security Budget"
+                    why="Everything below is constrained by this number - it decides what's actually affordable to invest in this cycle."
+                />
                 <div className="flex justify-between items-center mb-stack-sm">
                     <label htmlFor="optimizer-budget" className="font-body-sm text-body-sm font-semibold">Security Budget Allocation</label>
                     <span className="font-data-mono text-[15px] font-bold text-primary tabular-nums" aria-hidden="true">{formatINR(budgetValue)}</span>
@@ -185,159 +258,223 @@ export default function OptimizePage() {
                 {error && <p className="font-body-sm text-body-sm text-error mt-stack-sm">{error}</p>}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter items-start">
-                {/* Left column: KPIs + frontier chart */}
-                <div className="lg:col-span-8 flex flex-col gap-gutter">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-gutter">
-                        {([
-                            { key: 'budget', label: 'Budget', value: budgetValue, tone: 'text-primary', caption: 'Allocated this run' },
-                            { key: 'reduced', label: 'Risk Reduced', value: totalRiskReduced, tone: 'text-primary', caption: `From ${selected.length} of ${PATCHES.length} controls` },
-                            { key: 'residual', label: 'Residual Exposure', value: residual, tone: 'text-secondary', caption: 'Mean expected loss minus reduction' },
-                        ] as const).map((kpi) => (
-                            <div key={kpi.key} className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter shadow-sm">
-                                <div className="flex items-center gap-2 mb-stack-sm">
-                                    <span className={`material-symbols-outlined text-[16px] ${kpi.tone}`}>{KPI_ICONS[kpi.key]}</span>
-                                    <span className="font-label-caps text-label-caps text-on-surface-variant uppercase">{kpi.label}</span>
-                                </div>
-                                <div className={`font-data-mono text-[28px] leading-[34px] font-bold tracking-tight tabular-nums ${kpi.tone}`}>
-                                    {isLoading ? '–' : formatINR(kpi.value)}
-                                </div>
-                                <div className="font-body-sm text-body-sm text-on-surface-variant mt-unit">{kpi.caption}</div>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter shadow-sm flex-1 min-h-[400px] flex flex-col">
-                        <div className="mb-stack-lg">
-                            <h3 className="font-title-lg text-title-lg text-primary">Efficiency Frontier</h3>
-                            <p className="font-body-sm text-body-sm text-on-surface-variant">Cumulative cost vs. cumulative risk reduction, walked in ROSI order across all {PATCHES.length} modeled controls.</p>
-                        </div>
-                        <div className="flex-1 min-h-[280px]">
-                            <ResponsiveContainer width="100%" height={320}>
-                                <AreaChart data={FRONTIER} margin={{ top: 28, right: 16, left: 0, bottom: 4 }}>
-                                    <defs>
-                                        <linearGradient id="frontierFill" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.28} />
-                                            <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
-                                    <XAxis
-                                        dataKey="cost"
-                                        type="number"
-                                        domain={[0, 'dataMax']}
-                                        tickFormatter={formatINR}
-                                        fontSize={11}
-                                        tickLine={false}
-                                        axisLine={{ stroke: 'var(--outline-variant)' }}
-                                        stroke="var(--on-surface-variant)"
-                                        tickMargin={8}
-                                    />
-                                    <YAxis
-                                        tickFormatter={formatINR}
-                                        fontSize={11}
-                                        tickLine={false}
-                                        axisLine={false}
-                                        stroke="var(--on-surface-variant)"
-                                        width={56}
-                                        tickMargin={4}
-                                    />
-                                    <Tooltip
-                                        formatter={(v: number) => [formatINR(v), 'Cumulative reduction']}
-                                        labelFormatter={(v: number) => `Cumulative cost: ${formatINR(v)}`}
-                                        contentStyle={{ background: 'var(--surface-container-lowest)', border: '1px solid var(--outline-variant)', borderRadius: 8, fontSize: 12 }}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="reduction"
-                                        stroke="var(--primary)"
-                                        strokeWidth={2.5}
-                                        fill="url(#frontierFill)"
-                                        dot={false}
-                                        activeDot={{ r: 5 }}
-                                    />
-                                    <ReferenceLine
-                                        x={budgetValue}
-                                        stroke="var(--error)"
-                                        strokeDasharray="4 4"
-                                        strokeWidth={1.5}
-                                        label={{ value: 'Current budget', position: 'insideTopRight', fontSize: 10, fill: 'var(--error)', offset: 10 }}
-                                    />
-                                    {optimization && (
-                                        <ReferenceDot
-                                            x={optimization.total_cost || 0}
-                                            y={optimization.total_risk_reduced || 0}
-                                            r={5}
-                                            fill="var(--primary)"
-                                            stroke="var(--surface-container-lowest)"
-                                            strokeWidth={2}
-                                            label={{ value: 'Your plan', position: 'top', fontSize: 10, fill: 'var(--primary)', offset: 8 }}
-                                        />
-                                    )}
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
+            {/* Step 2: Pick the controls - automatic (demo) or manual (own data) */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <div className="flex justify-between items-start gap-stack-sm flex-wrap mb-stack-sm">
+                    <StepHeader
+                        step={2}
+                        title={isOwn ? 'Choose Your Controls' : 'Review the Recommended Plan'}
+                        why={isOwn
+                            ? "You know your environment best - check off the controls you actually plan to invest in. We total the cost and expected risk reduction as you go."
+                            : 'Our knapsack optimizer already picked the combination of controls that reduces the most risk per rupee within your budget - this is what it chose, and why.'}
+                    />
+                    {isOwn && autoSelected.length > 0 && (
+                        <button
+                            onClick={useRecommendedMix}
+                            title="Copy the optimizer's own budget-only suggestion as a starting point - you can still adjust it afterward"
+                            className="px-3 py-1.5 border border-outline-variant text-on-surface-variant rounded font-label-caps text-label-caps font-semibold hover:bg-surface-container-low transition-colors active:scale-95 flex items-center gap-1 shrink-0"
+                        >
+                            <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+                            See What the Optimizer Would Pick
+                        </button>
+                    )}
                 </div>
 
-                {/* Right column: real optimizer plan */}
-                <div className="lg:col-span-4 flex flex-col bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm h-[600px]">
-                    <div className="p-stack-md border-b border-outline-variant bg-surface shrink-0">
-                        <div className="flex justify-between items-center mb-unit">
-                            <h3 className="font-title-lg text-title-lg text-primary">Optimizer Plan</h3>
-                            <span className="bg-secondary-container text-on-secondary-container text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide">Knapsack</span>
-                        </div>
-                        <p className="font-body-sm text-body-sm text-on-surface-variant">Live selection from the budget above.</p>
+                {isOwn && (
+                    <div className={`flex items-center justify-between gap-stack-sm mb-stack-md px-3 py-2 rounded font-body-sm text-body-sm ${overBudget ? 'bg-error/10 text-error' : 'bg-surface-container-low text-on-surface-variant'}`}>
+                        <span className="flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[16px]">{overBudget ? 'warning' : 'info'}</span>
+                            {selected.length} control{selected.length === 1 ? '' : 's'} selected - {formatINR(manualCost)} of your {formatINR(budgetValue)} budget
+                        </span>
+                        {overBudget && <span className="font-label-caps text-label-caps font-bold">Over budget</span>}
                     </div>
-                    <div className="flex-1 min-h-0 overflow-y-auto p-stack-sm flex flex-col gap-stack-sm custom-scrollbar">
-                        {isLoading && !result && (
-                            <div className="text-center py-stack-lg shrink-0">
-                                <span className="material-symbols-outlined text-[28px] text-outline animate-spin">progress_activity</span>
-                            </div>
-                        )}
-                        {PATCHES.map((p) => {
-                            const included = selected.includes(p.id);
-                            const rosi = Math.round(((p.risk_reduction - p.cost) / p.cost) * 100);
-                            return (
-                                <div
-                                    key={p.id}
-                                    className={`shrink-0 border rounded-lg px-stack-sm py-2 relative overflow-hidden transition-colors ${
-                                        included
-                                            ? 'bg-surface border-primary/30'
-                                            : 'bg-surface-container-low border-outline-variant opacity-60'
-                                    }`}
-                                >
-                                    {included && <div className="absolute top-0 left-0 w-[3px] h-full bg-primary" />}
-                                    <div className={`flex items-start justify-between gap-2 ${included ? 'pl-2' : ''}`}>
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-1.5">
-                                                <span
-                                                    className="material-symbols-outlined text-[14px] shrink-0"
-                                                    style={{ fontVariationSettings: included ? "'FILL' 1" : "'FILL' 0" }}
-                                                >
-                                                    {included ? 'check_circle' : 'radio_button_unchecked'}
-                                                </span>
-                                                <h4 className={`font-body-sm text-body-sm font-semibold leading-tight truncate ${included ? 'text-primary' : 'text-on-surface-variant'}`} title={p.id}>
-                                                    {p.id}
-                                                </h4>
-                                            </div>
-                                            <div className="flex items-center gap-1.5 mt-1 pl-[20px]">
-                                                <span className="bg-surface-container-high text-on-surface-variant text-[9px] uppercase font-bold px-1.5 py-0.5 rounded">{p.tag}</span>
-                                                <span className={`font-data-mono text-[11px] font-semibold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{rosi}% ROSI</span>
-                                            </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-stack-sm">
+                    {isLoading && !result && (
+                        <div className="col-span-full text-center py-stack-lg">
+                            <span className="material-symbols-outlined text-[28px] text-outline animate-spin">progress_activity</span>
+                        </div>
+                    )}
+                    {PATCHES.map((p) => {
+                        const included = selected.includes(p.id);
+                        const isRecommended = isOwn && autoSelected.includes(p.id);
+                        const rosi = Math.round(((p.risk_reduction - p.cost) / p.cost) * 100);
+                        return (
+                            <button
+                                key={p.id}
+                                type="button"
+                                onClick={isOwn ? () => togglePatch(p.id) : undefined}
+                                disabled={!isOwn}
+                                className={`text-left border rounded-lg px-stack-sm py-2 relative overflow-hidden transition-colors disabled:cursor-default ${
+                                    included
+                                        ? 'bg-surface border-primary/30'
+                                        : 'bg-surface-container-low border-outline-variant opacity-70'
+                                } ${isOwn ? 'hover:opacity-100 hover:border-primary cursor-pointer active:scale-[0.98]' : ''}`}
+                            >
+                                {included && <div className="absolute top-0 left-0 w-[3px] h-full bg-primary" />}
+                                <div className={`flex items-start justify-between gap-2 ${included ? 'pl-2' : ''}`}>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                            <span
+                                                className="material-symbols-outlined text-[14px] shrink-0"
+                                                style={{ fontVariationSettings: included ? "'FILL' 1" : "'FILL' 0" }}
+                                            >
+                                                {included ? 'check_circle' : 'radio_button_unchecked'}
+                                            </span>
+                                            <h4 className={`font-body-sm text-body-sm font-semibold leading-tight truncate ${included ? 'text-primary' : 'text-on-surface-variant'}`} title={p.id}>
+                                                {p.id}
+                                            </h4>
                                         </div>
-                                        <div className="text-right shrink-0">
-                                            <div className={`font-data-mono text-[13px] font-bold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(p.cost)}</div>
+                                        <div className="flex items-center gap-1.5 mt-1 pl-[20px] flex-wrap">
+                                            <span className="bg-surface-container-high text-on-surface-variant text-[9px] uppercase font-bold px-1.5 py-0.5 rounded">{p.tag}</span>
+                                            <span className={`font-data-mono text-[11px] font-semibold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{rosi}% ROSI</span>
+                                            {isRecommended && (
+                                                <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-[9px] flex items-center gap-0.5">
+                                                    <span className="material-symbols-outlined text-[10px]">auto_awesome</span>Recommended
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
+                                    <div className="text-right shrink-0">
+                                        <div className={`font-data-mono text-[13px] font-bold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(p.cost)}</div>
+                                    </div>
                                 </div>
-                            );
-                        })}
-                    </div>
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
-            <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
+            {/* Step 3: Impact - KPIs + efficiency frontier */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <StepHeader
+                    step={3}
+                    title="See the Impact"
+                    why="Compares your plan's cost and risk reduction against the theoretical best use of every rupee across all controls."
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-gutter mb-stack-lg">
+                    {([
+                        { key: 'budget', label: 'Budget', value: budgetValue, tone: 'text-primary', caption: 'Allocated this run' },
+                        { key: 'reduced', label: 'Risk Reduced', value: totalRiskReduced, tone: 'text-primary', caption: `From ${selected.length} of ${PATCHES.length} controls` },
+                        { key: 'residual', label: 'Residual Exposure', value: residual, tone: 'text-secondary', caption: 'Mean expected loss minus reduction' },
+                    ] as const).map((kpi) => (
+                        <div key={kpi.key} className="bg-surface border border-outline-variant rounded-xl p-gutter shadow-sm">
+                            <div className="flex items-center gap-2 mb-stack-sm">
+                                <span className={`material-symbols-outlined text-[16px] ${kpi.tone}`}>{KPI_ICONS[kpi.key]}</span>
+                                <span className="font-label-caps text-label-caps text-on-surface-variant uppercase">{kpi.label}</span>
+                            </div>
+                            <div className={`font-data-mono text-[28px] leading-[34px] font-bold tracking-tight tabular-nums ${kpi.tone}`}>
+                                {isLoading ? '–' : formatINR(kpi.value)}
+                            </div>
+                            <div className="font-body-sm text-body-sm text-on-surface-variant mt-unit">{kpi.caption}</div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="min-h-[280px]">
+                    <ResponsiveContainer width="100%" height={320}>
+                        <AreaChart data={FRONTIER} margin={{ top: 28, right: 16, left: 0, bottom: 4 }}>
+                            <defs>
+                                <linearGradient id="frontierFill" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.28} />
+                                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
+                            <XAxis
+                                dataKey="cost"
+                                type="number"
+                                domain={[0, 'dataMax']}
+                                tickFormatter={formatINR}
+                                fontSize={11}
+                                tickLine={false}
+                                axisLine={{ stroke: 'var(--outline-variant)' }}
+                                stroke="var(--on-surface-variant)"
+                                tickMargin={8}
+                            />
+                            <YAxis
+                                tickFormatter={formatINR}
+                                fontSize={11}
+                                tickLine={false}
+                                axisLine={false}
+                                stroke="var(--on-surface-variant)"
+                                width={56}
+                                tickMargin={4}
+                            />
+                            <Tooltip
+                                formatter={(v: number) => [formatINR(v), 'Cumulative reduction']}
+                                labelFormatter={(v: number) => `Cumulative cost: ${formatINR(v)}`}
+                                contentStyle={{ background: 'var(--surface-container-lowest)', border: '1px solid var(--outline-variant)', borderRadius: 8, fontSize: 12 }}
+                            />
+                            <Area
+                                type="monotone"
+                                dataKey="reduction"
+                                stroke="var(--primary)"
+                                strokeWidth={2.5}
+                                fill="url(#frontierFill)"
+                                dot={false}
+                                activeDot={{ r: 5 }}
+                            />
+                            <ReferenceLine
+                                x={budgetValue}
+                                stroke="var(--error)"
+                                strokeDasharray="4 4"
+                                strokeWidth={1.5}
+                                label={{ value: 'Current budget', position: 'insideTopRight', fontSize: 10, fill: 'var(--error)', offset: 10 }}
+                            />
+                            {isOwn && optimization && manualCost > 0 && (optimization.total_cost !== manualCost || optimization.total_risk_reduced !== manualRiskReduced) && (
+                                <ReferenceDot
+                                    x={optimization.total_cost || 0}
+                                    y={optimization.total_risk_reduced || 0}
+                                    r={4}
+                                    fill="var(--on-surface-variant)"
+                                    stroke="var(--surface-container-lowest)"
+                                    strokeWidth={2}
+                                    label={{ value: "Optimizer's pick", position: 'bottom', fontSize: 10, fill: 'var(--on-surface-variant)', offset: 8 }}
+                                />
+                            )}
+                            {selected.length > 0 && (
+                                <ReferenceDot
+                                    x={totalCost || 0}
+                                    y={totalRiskReduced || 0}
+                                    r={5}
+                                    fill="var(--primary)"
+                                    stroke="var(--surface-container-lowest)"
+                                    strokeWidth={2}
+                                    label={{ value: 'Your plan', position: 'top', fontSize: 10, fill: 'var(--primary)', offset: 8 }}
+                                />
+                            )}
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* Step 4: Approve & log */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <StepHeader
+                    step={4}
+                    title="Approve & Log Your Decision"
+                    why="Logging creates a permanent, board-approved audit record for this plan - visit the Ledger afterward to also commit it to the on-chain trail."
+                />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-stack-sm">
+                    <p className="font-body-sm text-body-sm text-on-surface-variant max-w-lg">
+                        {isOwn
+                            ? `Approving logs your ${selected.length}-control plan (${formatINR(totalCost)}) as a board-approved decision.`
+                            : `Approving logs the optimizer's ${selected.length}-control plan (${formatINR(totalCost)}) as a board-approved decision.`}
+                    </p>
+                    <button
+                        onClick={approveOptimizer}
+                        disabled={(isOwn ? selected.length === 0 : !optimization) || isApproving}
+                        className="landing-cta-gradient py-2 px-4 rounded-lg font-body-md text-body-md font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+                    >
+                        <span className="material-symbols-outlined text-sm">lock</span>
+                        {isApproving ? 'Logging...' : 'Approve & Log to Ledger'}
+                    </button>
+                </div>
+            </div>
+
+            <a href={dataSource === 'own' ? '/ingestion' : '/overview'} className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
         </div>

@@ -148,6 +148,14 @@ const SEED_RUNS: { budget: number; controls: Record<string, boolean> }[] = [
     },
 ];
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function activeControlNames(run: SimRun): string[] {
     return Object.entries(run.active_controls || {})
         .filter(([, v]) => !!v)
@@ -247,8 +255,26 @@ function buildInsights(runs: SimRun[]): Insights | null {
 }
 
 export default function ReportsPage() {
-    const { token } = useAuth();
+    const { token, username } = useAuth();
     const { showToast } = useToast();
+
+    // [Own-Data / Demo isolation] Same per-account hydration pattern as
+    // the Ledger and Investment pages - reads which dashboard this
+    // account is on (crq_data_source:${username}) so this page's board
+    // report and simulation history only ever query that one dashboard's
+    // data instead of interleaving demo and own-data runs into one report.
+    const [dataSourceHydrated, setDataSourceHydrated] = useState(false);
+    const [dataSource, setDataSource] = useState<'predefined' | 'own'>('predefined');
+    useEffect(() => {
+        if (!username) { setDataSourceHydrated(true); return; }
+        try {
+            const stored = localStorage.getItem(`crq_data_source:${username}`);
+            setDataSource(stored === 'own' ? 'own' : 'predefined');
+        } catch (e) {
+            setDataSource('predefined');
+        }
+        setDataSourceHydrated(true);
+    }, [username]);
 
     const [decisions, setDecisions] = useState<Decision[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -260,12 +286,23 @@ export default function ReportsPage() {
 
     const [isSeeding, setIsSeeding] = useState(false);
     const [seedProgress, setSeedProgress] = useState<{ current: number; total: number } | null>(null);
+    // [Declutter the ledger] Twenty-plus rows made this page feel like a
+    // raw data dump - show the most recent handful by default and let
+    // anyone who actually wants the full run-by-run history expand it,
+    // rather than always rendering every persisted simulation at once.
+    const [showAllRuns, setShowAllRuns] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
+    // Same idea for the Framework Coverage Matrix - a board member cares
+    // about what's active far more than the full 11-row reference table,
+    // so default to just the active rows and let "Show all" reveal the
+    // rest.
+    const [showAllFrameworkRows, setShowAllFrameworkRows] = useState(false);
 
     const fetchSnapshot = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -275,13 +312,13 @@ export default function ReportsPage() {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [dataSource]);
 
     const fetchSimulations = useCallback(async () => {
         setIsSimLoading(true);
         setSimError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/simulations?limit=20`);
+            const res = await fetchWithRetry(`${API_BASE}/api/simulations?limit=20&data_source=${dataSource}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setSimulations(data.data || []);
@@ -291,7 +328,7 @@ export default function ReportsPage() {
         } finally {
             setIsSimLoading(false);
         }
-    }, []);
+    }, [dataSource]);
 
     const refreshAll = useCallback(() => {
         fetchSnapshot();
@@ -318,7 +355,7 @@ export default function ReportsPage() {
                 const res = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls }),
+                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls, data_source: 'predefined' }),
                 });
                 if (res.ok) continue;
 
@@ -346,7 +383,7 @@ export default function ReportsPage() {
                 const retryRes = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls }),
+                    body: JSON.stringify({ budget: run.budget, active_controls: run.controls, data_source: 'predefined' }),
                 });
                 if (!retryRes.ok) {
                     const retryData = await retryRes.json().catch(() => ({}));
@@ -366,8 +403,9 @@ export default function ReportsPage() {
     };
 
     useEffect(() => {
+        if (!dataSourceHydrated) return;
         refreshAll();
-    }, [refreshAll]);
+    }, [refreshAll, dataSourceHydrated]);
 
     const totalRisk = decisions.reduce((sum, d) => sum + (d.risk_accepted || 0), 0);
     const approvedCount = decisions.filter((d) => d.board_approved).length;
@@ -380,23 +418,145 @@ export default function ReportsPage() {
 
     const isLoadingAny = isLoading || isSimLoading;
 
+    const VISIBLE_RUN_COUNT = 5;
+    const visibleSimulations = showAllRuns ? simulations : simulations.slice(0, VISIBLE_RUN_COUNT);
+
+    // [Save to local disk] Builds one self-contained, print-friendly HTML
+    // document from the exact same data already on screen (Board Approval
+    // Basis, the FULL simulation ledger regardless of the collapsed table
+    // view above, and the current Framework Coverage Matrix), then hands
+    // it to the browser as a real file download - no server round trip,
+    // no new dependency. Opens fine as a document on its own, and prints
+    // cleanly to PDF straight from the browser's own Print dialog if
+    // that's what someone actually wants to hand to a board.
+    const downloadReport = () => {
+        setIsDownloading(true);
+        try {
+            const generatedAt = new Date().toLocaleString();
+            const coverage = simulations[0]?.framework_coverage || [];
+
+            const ledgerRows = simulations.map((r, idx) => {
+                const controls = activeControlNames(r);
+                const roi = roiPct(r);
+                return `<tr>
+                    <td>#${simulations.length - idx}</td>
+                    <td>${escapeHtml(new Date(r.timestamp).toLocaleString())}</td>
+                    <td>${r.budget_used != null ? `Rs ${(r.budget_used / 10000000).toFixed(2)} Cr` : '—'}</td>
+                    <td>Rs ${(r.expected_annual_loss / 10000000).toFixed(2)} Cr</td>
+                    <td>${r.var_95 != null ? `Rs ${(r.var_95 / 10000000).toFixed(2)} Cr` : '—'}</td>
+                    <td>${roi != null ? `${roi.toFixed(0)}%` : '—'}</td>
+                    <td>${r.sebi_resilience?.cci_score != null ? `${r.sebi_resilience.cci_score.toFixed(1)}/5` : '—'}</td>
+                    <td>${escapeHtml(controls.length > 0 ? controls.join(', ') : 'None')}</td>
+                </tr>`;
+            }).join('');
+
+            const coverageRows = coverage.map((row) => `<tr>
+                <td>${row.active ? 'Active' : 'Not active'}</td>
+                <td>${escapeHtml(row.id)}</td>
+                <td>${escapeHtml(row.nist_csf)}</td>
+                <td>${escapeHtml(row.iso27001)}</td>
+                <td>${escapeHtml(row.cis_controls)}</td>
+            </tr>`).join('');
+
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CRQ Platform - Board Report - ${escapeHtml(generatedAt)}</title>
+<style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #1a1a1a; max-width: 960px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    h2 { font-size: 16px; margin-top: 36px; border-bottom: 2px solid #1a1a1a; padding-bottom: 6px; }
+    .subtitle { color: #555; font-size: 13px; margin-bottom: 24px; }
+    .stats { display: flex; gap: 24px; flex-wrap: wrap; margin: 12px 0 20px; }
+    .stat { min-width: 140px; }
+    .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; }
+    .stat .value { font-size: 20px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #ddd; }
+    th { background: #f2f2f2; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; color: #444; }
+    .footer { margin-top: 40px; font-size: 11px; color: #888; }
+    @media print { body { margin: 10px auto; } }
+</style>
+</head>
+<body>
+    <h1>CRQ Platform - Board Report</h1>
+    <p class="subtitle">Generated ${escapeHtml(generatedAt)} - computed live from the audit trail and every persisted simulation.</p>
+
+    <h2>Board Approval Basis</h2>
+    <div class="stats">
+        <div class="stat"><div class="label">Decisions Logged</div><div class="value">${decisions.length}</div></div>
+        <div class="stat"><div class="label">Total Risk Accepted</div><div class="value">Rs ${(totalRisk / 10000000).toFixed(2)} Cr</div></div>
+        <div class="stat"><div class="label">Board Approved</div><div class="value">${approvedCount} / ${decisions.length}</div></div>
+        <div class="stat"><div class="label">Committed On-Chain</div><div class="value">${onChainCount} / ${decisions.length}</div></div>
+    </div>
+
+    <h2>Simulation Analysis Ledger (${simulations.length} run${simulations.length === 1 ? '' : 's'})</h2>
+    <table>
+        <thead><tr><th>#</th><th>Date</th><th>Budget</th><th>ALE</th><th>VaR-95</th><th>ROI</th><th>SEBI CCI</th><th>Active Controls</th></tr></thead>
+        <tbody>${ledgerRows || '<tr><td colspan="8">No simulations recorded.</td></tr>'}</tbody>
+    </table>
+
+    <h2>Framework Coverage Matrix</h2>
+    <table>
+        <thead><tr><th>Status</th><th>Strategic Control</th><th>NIST CSF</th><th>ISO/IEC 27001:2022</th><th>CIS Controls v8</th></tr></thead>
+        <tbody>${coverageRows || '<tr><td colspan="5">No simulation run yet.</td></tr>'}</tbody>
+    </table>
+
+    <p class="footer">Generated from the CRQ Platform. Every figure above reflects live telemetry and persisted simulation runs at the time of export - re-download for an updated snapshot.</p>
+</body>
+</html>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `CRQ_Board_Report_${new Date().toISOString().slice(0, 10)}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('Report downloaded - open it in your browser and print to PDF if you need one.', 'success');
+        } catch (e) {
+            console.error(e);
+            showToast('Could not generate the report file.', 'error');
+        } finally {
+            setIsDownloading(false);
+        }
+    };
+
     return (
         <div className="max-w-[1100px] mx-auto flex flex-col gap-stack-lg">
             <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
                 <div>
-                    <h1 className="font-headline-md text-headline-md text-primary mb-1">Reports</h1>
+                    <h1 className="font-headline-md text-headline-md text-primary mb-1 landing-font landing-heading-gradient">
+                        {dataSource === 'own' ? 'Own Data Report' : 'Demo Report'}
+                    </h1>
                     <p className="font-body-md text-body-md text-on-surface-variant">
-                        Board-ready risk figures and a run-over-run simulation ledger, computed live from the audit trail and every persisted simulation.
+                        {dataSource === 'own'
+                            ? "Board-ready risk figures and a run-over-run simulation ledger, computed live from your own ingested environment's audit trail and simulations - kept separate from the demo dashboard's."
+                            : 'Board-ready risk figures and a run-over-run simulation ledger, computed live from the demo audit trail and every persisted demo simulation.'}
                     </p>
                 </div>
-                <button
-                    onClick={refreshAll}
-                    disabled={isLoadingAny}
-                    className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
-                >
-                    <span className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
-                    Refresh
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        onClick={downloadReport}
+                        disabled={isLoadingAny || isDownloading}
+                        title="Downloads a self-contained HTML report - open it in your browser and print to PDF if you need one"
+                        className="landing-cta-gradient px-4 py-2 rounded font-body-sm text-body-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60 whitespace-nowrap"
+                    >
+                        <span className="material-symbols-outlined text-[18px]">download</span>
+                        {isDownloading ? 'Preparing...' : 'Download Report'}
+                    </button>
+                    <button
+                        onClick={refreshAll}
+                        disabled={isLoadingAny}
+                        className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
+                    >
+                        <span className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {/* Board Approval Basis */}
@@ -454,7 +614,7 @@ export default function ReportsPage() {
                             Every FAIR Monte Carlo run ever computed on Overview, most recent first - budget, ALE, VaR, ROI, and which Strategic Controls were active for that run.
                         </p>
                     </div>
-                    {simulations.length < 3 && (
+                    {dataSource === 'predefined' && simulations.length < 3 && (
                         <button
                             onClick={seedDemoHistory}
                             disabled={isSeeding}
@@ -552,7 +712,7 @@ export default function ReportsPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {simulations.map((r, idx) => {
+                                    {visibleSimulations.map((r, idx) => {
                                         const controls = activeControlNames(r);
                                         const roi = roiPct(r);
                                         return (
@@ -589,6 +749,15 @@ export default function ReportsPage() {
                                 </tbody>
                             </table>
                         </div>
+                        {simulations.length > VISIBLE_RUN_COUNT && (
+                            <button
+                                onClick={() => setShowAllRuns((v) => !v)}
+                                className="mt-stack-md w-full border border-outline-variant border-dashed rounded py-2 font-label-caps text-label-caps text-on-surface-variant hover:text-primary hover:border-primary transition-colors flex items-center justify-center gap-1"
+                            >
+                                <span className="material-symbols-outlined text-[16px]">{showAllRuns ? 'expand_less' : 'expand_more'}</span>
+                                {showAllRuns ? 'Show fewer runs' : `Show all ${simulations.length} runs`}
+                            </button>
+                        )}
                     </>
                 )}
             </div>
@@ -613,6 +782,13 @@ export default function ReportsPage() {
                     (() => {
                         const coverage = simulations[0].framework_coverage!;
                         const activeCount = coverage.filter((r) => r.active).length;
+                        const hasInactiveRows = activeCount < coverage.length;
+                        // If nothing is active yet, falling back to "active
+                        // only" would render an empty table - show
+                        // everything in that case regardless of the toggle.
+                        const visibleCoverage = (showAllFrameworkRows || activeCount === 0)
+                            ? coverage
+                            : coverage.filter((r) => r.active);
                         return (
                             <>
                                 <div className="flex flex-wrap items-center gap-2 mb-stack-md">
@@ -635,7 +811,7 @@ export default function ReportsPage() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {coverage.map((row) => (
+                                            {visibleCoverage.map((row) => (
                                                 <tr key={row.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
                                                     <td className="py-3 px-4">
                                                         <span className={`font-label-caps text-label-caps px-2 py-0.5 rounded ${row.active ? 'bg-[#15803d]/10 text-[#15803d]' : 'bg-surface-container text-on-surface-variant'}`}>
@@ -651,6 +827,15 @@ export default function ReportsPage() {
                                         </tbody>
                                     </table>
                                 </div>
+                                {hasInactiveRows && activeCount > 0 && (
+                                    <button
+                                        onClick={() => setShowAllFrameworkRows((v) => !v)}
+                                        className="mt-stack-md w-full border border-outline-variant border-dashed rounded py-2 font-label-caps text-label-caps text-on-surface-variant hover:text-primary hover:border-primary transition-colors flex items-center justify-center gap-1"
+                                    >
+                                        <span className="material-symbols-outlined text-[16px]">{showAllFrameworkRows ? 'expand_less' : 'expand_more'}</span>
+                                        {showAllFrameworkRows ? 'Show active controls only' : `Show all ${coverage.length} controls`}
+                                    </button>
+                                )}
                                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-stack-md">
                                     Each control is mapped to its single most representative clause per framework, not an exhaustive citation list - see <a href="/docs#compliance-frameworks" className="text-primary hover:underline">Docs</a> for the full methodology.
                                 </p>
@@ -690,7 +875,7 @@ export default function ReportsPage() {
                 </div>
             </div>
 
-            <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
+            <a href={dataSource === 'own' ? '/ingestion' : '/overview'} className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
         </div>

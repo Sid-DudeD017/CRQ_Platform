@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import { API_BASE } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 export default function VirtualCisoChat() {
+    const { token } = useAuth();
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>([]);
     const [chatInput, setChatInput] = useState('');
@@ -11,6 +13,12 @@ export default function VirtualCisoChat() {
 
     const sendMessage = async () => {
         if (!chatInput.trim()) return;
+
+        if (!token) {
+            setChatMessages([...chatMessages, { role: 'user', content: chatInput }, { role: 'assistant', content: 'Please log in to chat with the Virtual CISO.' }]);
+            setChatInput('');
+            return;
+        }
 
         const newMessages = [...chatMessages, { role: 'user', content: chatInput }];
         setChatMessages(newMessages);
@@ -20,7 +28,7 @@ export default function VirtualCisoChat() {
         try {
             const res = await fetch(`${API_BASE}/api/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ message: chatInput, context: null })
             });
 

@@ -147,6 +147,89 @@ interface ProgressData {
 // "how many people could have completed this module", not a placeholder.
 const DEMO_ACCOUNT_COUNT = 2;
 
+// [Platform Navigation Guide] Every one of these describes something real
+// and already built elsewhere in the app - not aspirational copy. Kept
+// here (rather than scattered as tooltips) so a brand-new user has one
+// place that explains what each part of the platform is for and how to
+// get there, without it being confused with the compliance modules above
+// (those move the FAIR model's Control Strength; this tab is pure
+// reference and touches nothing).
+interface NavGuideStep {
+    icon: string;
+    title: string;
+    where: string;
+    detail: string;
+}
+
+const NAV_GUIDE_STEPS: NavGuideStep[] = [
+    {
+        icon: 'fork_right',
+        title: '1. Pick Demo or Your Own Data',
+        where: 'Right after logging in, or anytime via "Switch Dashboard" in the top bar',
+        detail: '"Run a demo analysis" drops you straight into a live simulation over realistic pre-loaded telemetry. "Enter your own data" takes you to the Ingestion Engine to upload a real device config instead. You can switch back and forth at any time - nothing you\'ve already run is lost either way.',
+    },
+    {
+        icon: 'dashboard',
+        title: '2. Overview (Demo) / Ingestion Engine (Own Data)',
+        where: 'The first tab in either dashboard',
+        detail: 'Demo\'s Overview shows a simulation immediately. Own Data\'s Ingestion Engine has you upload a config file, then walks you through every finding it detected one at a time - confirm the ones that are real, ignore the ones that aren\'t. The Simulation Sandbox only appears once you\'ve worked through every finding.',
+    },
+    {
+        icon: 'monitoring',
+        title: '3. The Simulation Sandbox',
+        where: 'Bottom of Overview / Ingestion, once findings are reviewed',
+        detail: 'Set a remediation budget and toggle the Strategic Controls (MFA, Zero Trust, 24/7 SOC Monitoring, and more), then click "Run Simulation" for a fresh 20,000-iteration Monte Carlo run - Expected Annual Loss, Value at Risk, and a loss-distribution chart, all recomputed live.',
+    },
+    {
+        icon: 'gavel',
+        title: '4. Accept Risk or Approve a Plan',
+        where: 'Directly under a simulation\'s results',
+        detail: 'Once you have a result you\'re comfortable with, either accept the residual risk as-is or approve the optimizer\'s recommended patch plan. Both are logged as an auditable decision - see Ledger below.',
+    },
+    {
+        icon: 'trending_up',
+        title: '5. Investment',
+        where: 'Top nav',
+        detail: 'A step-by-step guide to where your remediation budget should actually go. Demo mode pre-selects the optimizer\'s picks for you; Own Data mode lets you choose controls yourself, budget-aware, with a button to see what the optimizer would have picked instead.',
+    },
+    {
+        icon: 'receipt_long',
+        title: '6. Ledger',
+        where: 'Top nav',
+        detail: 'Every risk you\'ve accepted or plan you\'ve approved, with the option to commit any decision to a local blockchain for a tamper-evident audit trail. Demo and Own Data keep completely separate ledgers, with separate on-chain commits.',
+    },
+    {
+        icon: 'target',
+        title: '7. Calibration',
+        where: 'Top nav',
+        detail: 'Log what actually happened after a real (or near-miss) incident. The model compares that outcome to what it had predicted and recalibrates control-effectiveness and confidence bands for every simulation you run afterward - this is what makes the model get sharper over time instead of repeating the same static assumptions.',
+    },
+    {
+        icon: 'assessment',
+        title: '8. Reports',
+        where: 'Top nav',
+        detail: 'A board-ready snapshot: total risk accepted, audit-trail integrity, a run-over-run simulation history chart, and the Framework Coverage Matrix crosswalking your active controls to NIST CSF, ISO/IEC 27001, and CIS Controls v8. Downloadable as a self-contained report.',
+    },
+    {
+        icon: 'auto_awesome',
+        title: '9. Virtual CISO Chat',
+        where: 'Chat icon, bottom-right corner, on every dashboard page',
+        detail: 'An AI assistant that can answer security and compliance questions using this session\'s actual live risk data - not a generic chatbot reciting boilerplate.',
+    },
+    {
+        icon: 'search',
+        title: '10. Command Palette',
+        where: 'The search bar in the top nav',
+        detail: 'Jump to any page instantly instead of hunting through the nav bar - useful once you\'re moving between Overview/Ingestion, Investment, Ledger, Calibration, and Reports regularly.',
+    },
+    {
+        icon: 'model_training',
+        title: 'About this Training page',
+        where: 'You\'re on it - reachable anytime via "Switch Dashboard"',
+        detail: 'The "Security & Compliance Training" tab is the only part of this page that feeds the model - completing those modules raises the Control Strength boost used in every simulation. This "Platform Navigation Guide" tab is pure reference: reading it doesn\'t change any number anywhere.',
+    },
+];
+
 function QuickCheck({ quiz }: { quiz: QuizQuestion }) {
     const [selected, setSelected] = useState<number | null>(null);
     const isCorrect = selected !== null && selected === quiz.correctIndex;
@@ -273,6 +356,23 @@ function ModuleCard({
     );
 }
 
+function NavGuideCard({ step }: { step: NavGuideStep }) {
+    return (
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col gap-2">
+            <div className="flex gap-stack-md items-start">
+                <span className="w-9 h-9 rounded-full landing-icon-badge flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[18px]">{step.icon}</span>
+                </span>
+                <div className="flex-1 min-w-0">
+                    <p className="font-body-sm text-body-sm font-semibold">{step.title}</p>
+                    <p className="font-data-mono text-data-mono text-on-surface-variant mt-0.5">{step.where}</p>
+                </div>
+            </div>
+            <p className="font-body-sm text-body-sm text-on-surface-variant sm:pl-[48px]">{step.detail}</p>
+        </div>
+    );
+}
+
 export default function TrainingPage() {
     const { token, username } = useAuth();
     const { showToast } = useToast();
@@ -280,6 +380,13 @@ export default function TrainingPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [togglingModule, setTogglingModule] = useState<string | null>(null);
+    // [Platform Navigation Guide] This page covers two genuinely different
+    // things - the compliance quiz modules that actually feed the FAIR
+    // model's Control Strength boost, and a pure-reference walkthrough of
+    // how to use/navigate the rest of the platform. Keeping them as tabs
+    // on one page (rather than the guide living somewhere else) is what
+    // makes this page unambiguously "Training", not a stray dashboard tab.
+    const [activeTab, setActiveTab] = useState<'compliance' | 'navigation'>('compliance');
 
     const fetchProgress = useCallback(async () => {
         setIsLoading(true);
@@ -352,134 +459,182 @@ export default function TrainingPage() {
     return (
         <div className="max-w-[1000px] mx-auto flex flex-col gap-stack-lg">
             <div>
-                <h1 className="font-headline-md text-headline-md text-primary mb-1">Training</h1>
+                <h1 className="font-headline-md text-headline-md text-primary mb-1 landing-font landing-heading-gradient">Training</h1>
                 <p className="font-body-md text-body-md text-on-surface-variant">
-                    The security-awareness and compliance training this platform&apos;s risk model assumes is in place - work through each module, take the quick check, and mark it complete.
+                    Everything about learning this platform lives here - the compliance modules your risk model assumes are in place, and a plain-language guide to what every other page does and how to get to it.
                 </p>
             </div>
 
-            {/* Coverage hero - real chart, real data, tied explicitly to the FAIR calc */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter grid grid-cols-1 md:grid-cols-[160px_1fr] gap-gutter items-center">
-                <div className="relative w-[160px] h-[160px] mx-auto">
-                    {isLoading ? (
-                        <div className="w-full h-full rounded-full bg-surface-variant/40 animate-pulse" />
-                    ) : (
-                        <>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RadialBarChart
-                                    innerRadius="72%"
-                                    outerRadius="100%"
-                                    data={[{ value: coveragePct, fill: 'var(--primary)' }]}
-                                    startAngle={90}
-                                    endAngle={-270}
-                                >
-                                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                                    <RadialBar background dataKey="value" cornerRadius={8} />
-                                </RadialBarChart>
-                            </ResponsiveContainer>
-                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                <span className="font-headline-md text-headline-md font-data-mono text-primary">{coveragePct.toFixed(0)}%</span>
-                                <span className="font-label-caps text-label-caps text-on-surface-variant">coverage</span>
-                            </div>
-                        </>
-                    )}
-                </div>
-                <div>
-                    <h3 className="font-title-lg text-title-lg text-primary mb-1">Organization-wide training coverage</h3>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">
-                        {isLoading
-                            ? 'Loading...'
-                            : error
-                                ? error
-                                : `${modulesCovered} of ${TRAINING_MODULES.length} required modules have at least one completion logged.`}
-                        {' '}This isn&apos;t just a checklist - <code className="font-data-mono text-data-mono">derive_fair_inputs()</code> on the backend folds this coverage into a real Control Strength boost (up to +10 points at 100% coverage), so completing a module here actually moves the Expected Annual Loss on the Overview dashboard, not just a badge on this page.
-                    </p>
-                    <div className="flex items-center gap-2 font-data-mono text-data-mono text-primary">
-                        <span className="material-symbols-outlined text-[16px]">bolt</span>
-                        +{boostPts.toFixed(1)} pts to Control Strength right now
-                    </div>
-                </div>
+            {/* Tab switcher - deliberately just these two. This page is not
+                a dashboard tab: no Overview, Investment, Ledger, Calibration
+                or Reports content belongs here. */}
+            <div className="flex gap-2 border-b border-outline-variant">
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('compliance')}
+                    className={`px-4 py-2.5 font-body-sm text-body-sm font-semibold flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+                        activeTab === 'compliance' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-primary'
+                    }`}
+                >
+                    <span className="material-symbols-outlined text-[18px]">school</span>
+                    Security &amp; Compliance Training
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('navigation')}
+                    className={`px-4 py-2.5 font-body-sm text-body-sm font-semibold flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${
+                        activeTab === 'navigation' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-primary'
+                    }`}
+                >
+                    <span className="material-symbols-outlined text-[18px]">map</span>
+                    Platform Navigation Guide
+                </button>
             </div>
 
-            {!token && (
-                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex gap-stack-sm items-center">
-                    <span className="material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">
-                        Log in as CISO or CFO (top-right corner) to mark modules complete and count toward the coverage above.
-                    </p>
+            {activeTab === 'compliance' && (
+                <>
+                    {/* Coverage hero - real chart, real data, tied explicitly to the FAIR calc */}
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter grid grid-cols-1 md:grid-cols-[160px_1fr] gap-gutter items-center">
+                        <div className="relative w-[160px] h-[160px] mx-auto">
+                            {isLoading ? (
+                                <div className="w-full h-full rounded-full bg-surface-variant/40 animate-pulse" />
+                            ) : (
+                                <>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RadialBarChart
+                                            innerRadius="72%"
+                                            outerRadius="100%"
+                                            data={[{ value: coveragePct, fill: 'var(--primary)' }]}
+                                            startAngle={90}
+                                            endAngle={-270}
+                                        >
+                                            <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                                            <RadialBar background dataKey="value" cornerRadius={8} />
+                                        </RadialBarChart>
+                                    </ResponsiveContainer>
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                        <span className="font-headline-md text-headline-md font-data-mono text-primary">{coveragePct.toFixed(0)}%</span>
+                                        <span className="font-label-caps text-label-caps text-on-surface-variant">coverage</span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <div>
+                            <h3 className="font-title-lg text-title-lg text-primary mb-1">Organization-wide training coverage</h3>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">
+                                {isLoading
+                                    ? 'Loading...'
+                                    : error
+                                        ? error
+                                        : `${modulesCovered} of ${TRAINING_MODULES.length} required modules have at least one completion logged.`}
+                                {' '}This isn&apos;t just a checklist - <code className="font-data-mono text-data-mono">derive_fair_inputs()</code> on the backend folds this coverage into a real Control Strength boost (up to +10 points at 100% coverage), so completing a module here actually moves the Expected Annual Loss on Overview, not just a badge on this page.
+                            </p>
+                            <div className="flex items-center gap-2 font-data-mono text-data-mono text-primary">
+                                <span className="material-symbols-outlined text-[16px]">bolt</span>
+                                +{boostPts.toFixed(1)} pts to Control Strength right now
+                            </div>
+                        </div>
+                    </div>
+
+                    {!token && (
+                        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex gap-stack-sm items-center">
+                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant">
+                                Log in as CISO or CFO (top-right corner) to mark modules complete and count toward the coverage above.
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Coverage by module - compact bar breakdown */}
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                        <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Coverage by module</h3>
+                        <div className="flex flex-col gap-stack-sm">
+                            {isLoading ? (
+                                [100, 60, 40, 20, 10].map((w, i) => (
+                                    <div key={i} className="flex flex-col gap-1">
+                                        <div className="h-3 w-40 bg-surface-variant/40 rounded animate-pulse" />
+                                        <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
+                                            <div className="h-2 rounded bg-surface-variant/40 animate-pulse" style={{ width: `${w}%` }} />
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                TRAINING_MODULES.map((m) => {
+                                    const s = summaryByModule.get(m.id);
+                                    const count = s?.completed_count ?? 0;
+                                    const pct = (count / DEMO_ACCOUNT_COUNT) * 100;
+                                    return (
+                                        <div key={m.id}>
+                                            <div className="flex justify-between items-end mb-1">
+                                                <span className="font-body-sm text-body-sm font-medium">{m.title}</span>
+                                                <span className="font-data-mono text-data-mono text-on-surface-variant">{count}/{DEMO_ACCOUNT_COUNT}</span>
+                                            </div>
+                                            <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
+                                                <div
+                                                    className={`h-2 rounded ${count > 0 ? 'bg-primary' : 'bg-surface-variant/40'}`}
+                                                    style={{ width: `${Math.max(count > 0 ? 4 : 0, pct)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Why this page exists */}
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                        <div className="flex gap-stack-sm items-start">
+                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant">
+                                The FAIR model&apos;s Control Strength input and the SEBI Cyber Capability Index both assume a trained workforce - untrained staff show up indirectly as weaker control strength and lower Withstand/Anticipate scores on the Reports page. The modules below are what that training program actually needs to cover.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Required Modules - interactive learning cards */}
+                    <div>
+                        <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Required Training Modules</h3>
+                        <div className="flex flex-col gap-stack-sm">
+                            {TRAINING_MODULES.map((m) => {
+                                const summary = summaryByModule.get(m.id);
+                                const isCompletedByMe = !!username && !!summary?.completed_by.includes(username);
+                                return (
+                                    <ModuleCard
+                                        key={m.id}
+                                        module={m}
+                                        summary={summary}
+                                        isLoggedIn={!!token}
+                                        isCompletedByMe={isCompletedByMe}
+                                        isToggling={togglingModule === m.id}
+                                        onToggle={() => toggleComplete(m.id)}
+                                    />
+                                );
+                            })}
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {activeTab === 'navigation' && (
+                <div className="flex flex-col gap-stack-md">
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                        <div className="flex gap-stack-sm items-start">
+                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant">
+                                A plain-language map of the platform, in the order you&apos;d actually use it. This tab is reference only - nothing here changes any number, unlike the compliance modules on the other tab.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-sm">
+                        {NAV_GUIDE_STEPS.map((step) => (
+                            <NavGuideCard key={step.title} step={step} />
+                        ))}
+                    </div>
                 </div>
             )}
 
-            {/* Coverage by module - compact bar breakdown */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
-                <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Coverage by module</h3>
-                <div className="flex flex-col gap-stack-sm">
-                    {isLoading ? (
-                        [100, 60, 40, 20, 10].map((w, i) => (
-                            <div key={i} className="flex flex-col gap-1">
-                                <div className="h-3 w-40 bg-surface-variant/40 rounded animate-pulse" />
-                                <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-                                    <div className="h-2 rounded bg-surface-variant/40 animate-pulse" style={{ width: `${w}%` }} />
-                                </div>
-                            </div>
-                        ))
-                    ) : (
-                        TRAINING_MODULES.map((m) => {
-                            const s = summaryByModule.get(m.id);
-                            const count = s?.completed_count ?? 0;
-                            const pct = (count / DEMO_ACCOUNT_COUNT) * 100;
-                            return (
-                                <div key={m.id}>
-                                    <div className="flex justify-between items-end mb-1">
-                                        <span className="font-body-sm text-body-sm font-medium">{m.title}</span>
-                                        <span className="font-data-mono text-data-mono text-on-surface-variant">{count}/{DEMO_ACCOUNT_COUNT}</span>
-                                    </div>
-                                    <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
-                                        <div
-                                            className={`h-2 rounded ${count > 0 ? 'bg-primary' : 'bg-surface-variant/40'}`}
-                                            style={{ width: `${Math.max(count > 0 ? 4 : 0, pct)}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
-            </div>
-
-            {/* Why this page exists */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
-                <div className="flex gap-stack-sm items-start">
-                    <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">
-                        The FAIR model&apos;s Control Strength input and the SEBI Cyber Capability Index both assume a trained workforce - untrained staff show up indirectly as weaker control strength and lower Withstand/Anticipate scores on the Reports page. The modules below are what that training program actually needs to cover.
-                    </p>
-                </div>
-            </div>
-
-            {/* Required Modules - interactive learning cards */}
-            <div>
-                <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Required Training Modules</h3>
-                <div className="flex flex-col gap-stack-sm">
-                    {TRAINING_MODULES.map((m) => {
-                        const summary = summaryByModule.get(m.id);
-                        const isCompletedByMe = !!username && !!summary?.completed_by.includes(username);
-                        return (
-                            <ModuleCard
-                                key={m.id}
-                                module={m}
-                                summary={summary}
-                                isLoggedIn={!!token}
-                                isCompletedByMe={isCompletedByMe}
-                                isToggling={togglingModule === m.id}
-                                onToggle={() => toggleComplete(m.id)}
-                            />
-                        );
-                    })}
-                </div>
-            </div>
-
-            <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
+            <a href="/overview" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
         </div>

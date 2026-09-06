@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import UploadFile, File, BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import UploadFile, File, BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 
 from . import blockchain_client, generators, ingestion_engine, models, risk_engine
 from .database import SessionLocal, get_db, init_db
-from .security import authenticate_demo_user, create_access_token, get_current_user
+from .security import authenticate_demo_user, create_access_token, get_current_user, hash_password, verify_password
 
 # --- Add sibling directories to path to handle hyphens in folder names ---
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -94,6 +94,14 @@ class RiskSimRequest(BaseModel):
     # FAIR input derivation (see risk_engine.derive_fair_inputs) instead of
     # only ever affecting the separate budget-optimizer suggestion.
     active_controls: Optional[Dict[str, bool]] = None
+    # [Own-Data / Demo isolation] Which dashboard is asking - 'predefined'
+    # (demo Overview) or 'own' (Ingestion Engine). Overview and Ingestion
+    # each always send their own fixed value, same convention as
+    # AuditRequest.data_source below - it's what lets derive_fair_inputs
+    # read two genuinely separate Asset/TelemetryLog pools instead of one
+    # shared global one. See risk_engine.derive_fair_inputs' data_source
+    # param for the full story.
+    data_source: str = "predefined"
 
 
 class AuditRequest(BaseModel):
@@ -101,6 +109,14 @@ class AuditRequest(BaseModel):
     risk_accepted: float
     user_id: Optional[str] = None  # accepted for backward compat, but IGNORED now - see /api/audit
     board_approved: bool = False  # [RBI MANDATE] board oversight flag, recorded on-chain
+    # [Separate ledgers per dashboard] Which dashboard this decision came
+    # from - 'predefined' (demo Overview) or 'own' (Ingestion Engine).
+    # Overview and the Ingestion Engine each always send their own fixed
+    # value (they know unambiguously which one they are), so this isn't
+    # user-editable input - it just keeps demo and own-data acceptances
+    # from landing in the same undifferentiated ledger. See
+    # models.RiskDecision.data_source and GET /api/audit-log.
+    data_source: str = "predefined"
 
 
 class IngestParseRequest(BaseModel):
@@ -149,12 +165,57 @@ def read_root():
     return {"message": "CRQ Platform API Gateway"}
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
 @app.post("/api/auth/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    if not authenticate_demo_user(form_data.username, form_data.password):
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
-    token = create_access_token(subject=form_data.username)
-    return {"access_token": token, "token_type": "bearer"}
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # Two account types can log in through this one endpoint: the two
+    # fixed demo exec accounts (backend/security.py's DEMO_USERS, kept for
+    # the existing "Demo CISO / Demo CFO" quick-login buttons) and real
+    # accounts created via POST /api/auth/signup below. Demo check first
+    # since it's a plain dict lookup; only touches the database if that
+    # misses.
+    username = form_data.username.strip()
+    if authenticate_demo_user(username, form_data.password):
+        token = create_access_token(subject=username)
+        return {"access_token": token, "token_type": "bearer"}
+
+    email = username.lower()
+    user = db.exec(select(models.User).where(models.User.email == email)).first()
+    if user and verify_password(form_data.password, user.hashed_password):
+        token = create_access_token(subject=user.email)
+        return {"access_token": token, "token_type": "bearer", "email": user.email, "name": user.name}
+
+    raise HTTPException(status_code=401, detail="Incorrect email/username or password")
+
+
+@app.post("/api/auth/signup")
+def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    """Creates a real, persisted account (hashed password, never stored in
+    plaintext) so a visitor can register once and log back in later - see
+    module docstring in models.User. Auto-logs them in on success so
+    signup -> straight into the dashboard in one step."""
+    email = payload.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    existing = db.exec(select(models.User).where(models.User.email == email)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
+
+    user = models.User(email=email, hashed_password=hash_password(payload.password), name=(payload.name or None))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token(subject=user.email)
+    return {"access_token": token, "token_type": "bearer", "email": user.email, "name": user.name}
 
 
 @app.post("/api/generate-mock-data")
@@ -306,7 +367,8 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
     # backend/risk_engine.py - see that module's docstring for why this is
     # no longer computed independently in two places.
     inputs = risk_engine.derive_fair_inputs(
-        db, dpdp_override=dpdp_override, active_controls=payload.active_controls, calibration=calibration
+        db, dpdp_override=dpdp_override, active_controls=payload.active_controls, calibration=calibration,
+        data_source=payload.data_source,
     )
     if inputs is None:
         raise HTTPException(status_code=400, detail="No assets found. Run /api/generate-mock-data first.")
@@ -324,7 +386,7 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
     mc_results = quant_mc.run_fair_monte_carlo(**inputs)
     opt_results = quant_opt.optimize_budget(risk_engine.SECURITY_CONTROLS, payload.budget)
     business_unit_breakdown = risk_engine.compute_business_unit_breakdown(
-        db, mc_results["mean_expected_loss"], calibration=calibration
+        db, mc_results["mean_expected_loss"], calibration=calibration, data_source=payload.data_source
     )
 
     # [Closed-Loop Calibration Engine] a confidence band around this run's
@@ -358,6 +420,7 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
         sebi_resilience=mc_results.get("sebi_resilience", {}),
         risk_drivers=risk_drivers,
         framework_coverage=framework_coverage,
+        data_source=payload.data_source,
     )
     db.add(sim_record)
     db.commit()
@@ -365,6 +428,7 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
     return {
         "status": "success",
         "message": "Risk simulation completed",
+        "data_source": payload.data_source,
         "budget_used": payload.budget,
         "monte_carlo": {
             "mean_expected_loss": mc_results["mean_expected_loss"],
@@ -394,7 +458,11 @@ def simulate_risk(request: Request, payload: RiskSimRequest, db: Session = Depen
 
 
 @app.get("/api/simulations")
-def get_simulations(limit: int = 30, db: Session = Depends(get_db)):
+def get_simulations(
+    limit: int = 30,
+    data_source: Optional[str] = Query(None, description="Filter to one dashboard's run history: 'predefined' (demo Overview) or 'own' (Ingestion Engine). Omit to list every run regardless of source."),
+    db: Session = Depends(get_db),
+):
     """
     Recent /api/simulate-risk runs, most recent first - the "detailed
     analysis ledger" behind the Reports page. Each row is a real persisted
@@ -407,10 +475,20 @@ def get_simulations(limit: int = 30, db: Session = Depends(get_db)):
     included so the frontend can diff consecutive runs itself, down to
     which specific driver moved, rather than the backend guessing at
     causality.
+
+    [Own-Data / Demo isolation] Pass ?data_source=predefined or
+    ?data_source=own to scope the history to just that dashboard's runs -
+    same convention as GET /api/audit-log. A legacy row from before this
+    column existed has data_source=NULL - treated as 'predefined' here.
     """
-    rows = db.exec(
-        select(models.RiskSimulation).order_by(models.RiskSimulation.timestamp.desc()).limit(limit)
-    ).all()
+    query = select(models.RiskSimulation)
+    if data_source == "predefined":
+        query = query.where(
+            (models.RiskSimulation.data_source == "predefined") | (models.RiskSimulation.data_source.is_(None))
+        )
+    elif data_source == "own":
+        query = query.where(models.RiskSimulation.data_source == "own")
+    rows = db.exec(query.order_by(models.RiskSimulation.timestamp.desc()).limit(limit)).all()
     return {
         "status": "success",
         "count": len(rows),
@@ -427,6 +505,7 @@ def get_simulations(limit: int = 30, db: Session = Depends(get_db)):
                 "sebi_resilience": r.sebi_resilience or {},
                 "risk_drivers": r.risk_drivers or {},
                 "framework_coverage": r.framework_coverage or [],
+                "data_source": r.data_source,
             }
             for r in rows
         ],
@@ -489,6 +568,12 @@ def ingest_confirm(
         kind=request.kind,
         severity=request.severity,
         confirmed_by=current_user,
+        # [Own-Data / Demo isolation] The Ingestion Engine only exists on
+        # the own-data dashboard, so every confirmed mapping is always
+        # real-environment evidence - explicit here (not just relying on
+        # the model default) so derive_fair_inputs' gap_deduction never
+        # accidentally leaks into the demo dashboard's Control Strength.
+        data_source="own",
     )
     db.add(mapping)
     db.commit()
@@ -689,7 +774,7 @@ def get_calibration(db: Session = Depends(get_db)):
 
 @app.post("/api/chat")
 @limiter.limit("15/minute")
-async def chat(request: Request, payload: ChatRequest):
+async def chat(request: Request, payload: ChatRequest, current_user: str = Depends(get_current_user)):
     from langchain_core.messages import HumanMessage
 
     initial_state = {"messages": [HumanMessage(content=payload.message)]}
@@ -731,102 +816,158 @@ async def chat(request: Request, payload: ChatRequest):
     return StreamingResponse(event_stream(), media_type="text/plain")
 
 
-def trigger_blockchain_webhook(action: str, risk: float, user: str, decision_id: int, board_approved: bool = False):
-    """
-    Commits the risk-acceptance decision to the AuditLedger smart contract
-    on a local Hardhat chain, if one is running and the contract has been
-    deployed (see blockchain_client.py). Falls back to a print()-only mock
-    otherwise. Also records the RBI board_approved flag both on-chain and
-    on the RiskDecision row.
-
-    Runs as a BackgroundTask, i.e. after the HTTP response for /api/audit
-    has already gone out - opens its own short-lived session to write the
-    tx hash (or lack of one) back onto the same RiskDecision row, which is
-    what GET /api/audit-log reads to show real on-chain status per decision.
-    """
-    data_hash = f"decision:{decision_id}|risk:{risk}"
-    tx_hash = blockchain_client.log_risk_acceptance(
-        action=action, data_hash=data_hash, user=user, board_approved=board_approved
-    )
-    if tx_hash:
-        print(f"\n[BLOCKCHAIN AUDIT LOG] Committed on-chain to AuditLedger.sol. Tx hash: {tx_hash}")
-    else:
-        print(f"\n[BLOCKCHAIN AUDIT LOG] (mock - no local Hardhat chain reachable) Would commit to AuditLedger.sol!")
-    print(f"User: {user} | Action: {action} | Risk Accepted: ${risk:,.2f} | Decision #{decision_id} | Board Approved: {board_approved}\n")
-
-    with SessionLocal() as bg_db:
-        decision = bg_db.get(models.RiskDecision, decision_id)
-        if decision:
-            decision.tx_hash = tx_hash
-            decision.on_chain = bool(tx_hash)
-            decision.board_approved = board_approved
-            bg_db.add(decision)
-            bg_db.commit()
-
-
 @app.post("/api/audit")
 def log_audit(
     request: AuditRequest,
-    background_tasks: BackgroundTasks,
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Trigger the blockchain smart contract to log a risk acceptance event.
-    Requires a valid bearer token (POST /api/auth/login first). `decided_by`
-    comes from the verified token, never from `request.user_id`.
+    Logs a risk-acceptance decision to the database. Requires a valid
+    bearer token (POST /api/auth/login first). `decided_by` comes from the
+    verified token, never from `request.user_id`.
+
+    This used to also fire a background task that silently attempted a
+    blockchain commit on every single acceptance. It no longer does - the
+    decision is written off-chain (on_chain=False) here, and committing it
+    to the AuditLedger smart contract is now a separate, explicit action
+    the user takes afterwards from the Ledger page (POST
+    /api/audit-log/{id}/commit-chain) - review the decision first, then
+    opt in to putting it on-chain, rather than every acceptance racing to
+    write to a chain nobody asked about yet.
     """
     decision = models.RiskDecision(
         action=request.action,
         risk_accepted=request.risk_accepted,
         decided_by=current_user,
         board_approved=request.board_approved,
+        data_source=request.data_source,
     )
     db.add(decision)
     db.commit()
     db.refresh(decision)
 
-    background_tasks.add_task(
-        trigger_blockchain_webhook,
-        request.action, request.risk_accepted, current_user, decision.id, request.board_approved,
-    )
-
     return {
         "status": "success",
-        "message": "Audit logged to Zero-Trust Blockchain Ledger",
+        "message": "Audit logged. Visit the Ledger to commit it on-chain.",
         "action": request.action,
         "decision_id": decision.id,
         "decided_by": current_user,
         "board_approved": request.board_approved,
+        "data_source": decision.data_source,
     }
 
 
 @app.get("/api/audit-log")
-def get_audit_log(db: Session = Depends(get_db)):
+def get_audit_log(
+    data_source: Optional[str] = Query(None, description="Filter to one dashboard's ledger: 'predefined' (demo Overview) or 'own' (Ingestion Engine). Omit to list every decision regardless of source."),
+    db: Session = Depends(get_db),
+):
     """
-    Lists every risk-acceptance decision on record, most recent first -
-    backs the "View Detailed Ledger" page. Each row also reports whether
-    it made it onto the local blockchain (tx_hash/on_chain) and whether
-    board approval was recorded (board_approved).
+    Lists risk-acceptance decisions, most recent first - backs the "View
+    Detailed Ledger" page. Each row also reports whether it made it onto
+    the local blockchain (tx_hash/on_chain) and whether board approval was
+    recorded (board_approved).
+
+    [Separate ledgers per dashboard] Pass ?data_source=predefined or
+    ?data_source=own to scope the list to just that dashboard's decisions,
+    so demo-telemetry acceptances and real-ingested-data acceptances read
+    as two distinct ledgers instead of one undifferentiated table. A
+    legacy row from before this column existed has data_source=NULL in
+    the database - treated as 'predefined' here so old demo-era decisions
+    still show up somewhere sensible instead of disappearing.
     """
-    decisions = db.exec(
-        select(models.RiskDecision).order_by(models.RiskDecision.created_at.desc()).limit(200)
-    ).all()
+    query = select(models.RiskDecision)
+    if data_source == "predefined":
+        query = query.where(
+            (models.RiskDecision.data_source == "predefined") | (models.RiskDecision.data_source.is_(None))
+        )
+    elif data_source == "own":
+        query = query.where(models.RiskDecision.data_source == "own")
+    decisions = db.exec(query.order_by(models.RiskDecision.created_at.desc()).limit(200)).all()
     return {"status": "success", "data": decisions}
 
 
-@app.delete("/api/audit-log")
-def clear_audit_log(
+@app.post("/api/audit-log/{decision_id}/commit-chain")
+def commit_chain(
+    decision_id: int,
     current_user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Demo/dev utility: wipes every RiskDecision row so the ledger (and the
+    Explicit, user-initiated on-chain commit for one already-logged risk
+    decision. POST /api/audit no longer commits to the chain automatically
+    (see that endpoint's docstring) - this is the opt-in step someone
+    takes from the Ledger page after reviewing a decision, calling the
+    same AuditLedger.logRiskAcceptance contract method
+    (blockchain_client.log_risk_acceptance) that used to fire in the
+    background on every acceptance.
+    """
+    decision = db.get(models.RiskDecision, decision_id)
+    if not decision:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    if decision.on_chain:
+        return {
+            "status": "success",
+            "message": "Already committed on-chain",
+            "tx_hash": decision.tx_hash,
+            "on_chain": True,
+            "decision_id": decision.id,
+        }
+
+    data_hash = f"decision:{decision.id}|source:{decision.data_source or 'predefined'}|risk:{decision.risk_accepted}"
+    tx_hash = blockchain_client.log_risk_acceptance(
+        action=decision.action, data_hash=data_hash, user=current_user, board_approved=decision.board_approved,
+    )
+
+    if not tx_hash:
+        raise HTTPException(
+            status_code=503,
+            detail="No blockchain node reachable right now (local Hardhat chain, or a configured testnet RPC). The decision stays logged off-chain - try again once a chain is reachable.",
+        )
+
+    decision.tx_hash = tx_hash
+    decision.on_chain = True
+    db.add(decision)
+    db.commit()
+    db.refresh(decision)
+
+    return {
+        "status": "success",
+        "message": "Committed to Zero-Trust Blockchain Ledger",
+        "tx_hash": tx_hash,
+        "on_chain": True,
+        "decision_id": decision.id,
+    }
+
+
+@app.delete("/api/audit-log")
+def clear_audit_log(
+    data_source: Optional[str] = Query(None, description="Clear only one dashboard's ledger ('predefined' or 'own'). Omit to wipe every decision regardless of source."),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Demo/dev utility: wipes RiskDecision rows so a ledger (and its
     "Committed On-Chain" counter) can be reset back to 0 without touching
     the database by hand between test runs. Requires a valid bearer token,
     same as POST /api/audit - not exposed to anonymous callers.
+
+    [Separate ledgers per dashboard] Scoped to ?data_source=predefined or
+    ?data_source=own when given, matching GET /api/audit-log's filter -
+    the Ledger page always passes the dashboard it's currently showing, so
+    clearing the demo ledger never touches own-data decisions and vice
+    versa. Omitting it wipes everything (kept for scripts/tooling that
+    relied on the old unscoped behavior).
     """
-    decisions = db.exec(select(models.RiskDecision)).all()
+    query = select(models.RiskDecision)
+    if data_source == "predefined":
+        query = query.where(
+            (models.RiskDecision.data_source == "predefined") | (models.RiskDecision.data_source.is_(None))
+        )
+    elif data_source == "own":
+        query = query.where(models.RiskDecision.data_source == "own")
+    decisions = db.exec(query).all()
     count = len(decisions)
     for decision in decisions:
         db.delete(decision)

@@ -139,6 +139,21 @@ body, .bg-surface, .bg-background, .bg-surface-container-lowest, .bg-surface-con
   animation: fade-scale-in 0.3s ease-out;
 }
 
+/* [Deploy-level polish] A slower, more deliberate reveal for simulation
+   results specifically (vs. the snappier 0.3s UI transitions above) - the
+   sandbox's result panels remount (via a resultVersion key on RiskSandbox)
+   every time a simulation completes, so this replays on every run, not
+   just first load. animationDelay (set inline per section) staggers the
+   three panel rows into a gentle cascade instead of everything popping at
+   once. */
+@keyframes result-reveal {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-result-reveal {
+  animation: result-reveal 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @keyframes count-pulse {
   0% { opacity: 0.3; }
   100% { opacity: 1; }
@@ -262,3 +277,95 @@ a:focus-visible, button:focus-visible, input:focus-visible {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* Ambient hero glow - soft radial color blooms behind a page header.
+   Decorative only (pointer-events: none), subtle in light mode and a
+   genuine glow in dark mode, using the existing MD3 tokens so it always
+   matches whatever theme is active instead of a hardcoded color. */
+.ambient-glow {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+.ambient-glow::before,
+.ambient-glow::after {
+    content: '';
+    position: absolute;
+    width: 480px;
+    height: 480px;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.16;
+}
+.ambient-glow::before {
+    top: -220px;
+    left: -80px;
+    background: radial-gradient(circle, var(--secondary), transparent 70%);
+}
+.ambient-glow::after {
+    top: -260px;
+    right: -120px;
+    background: radial-gradient(circle, var(--tertiary), transparent 70%);
+}
+.dark .ambient-glow::before,
+.dark .ambient-glow::after {
+    opacity: 0.30;
+}
+
+/* Gradient brand mark - used for the logo/avatar squares instead of a
+   flat fill, so the brand reads with a bit more depth/polish. */
+.brand-gradient {
+    background: linear-gradient(135deg, var(--secondary), var(--tertiary));
+}
+
+
+/* Landing-page-only warm accent - the marketing splash (LandingPage.tsx)
+   uses a friendlier orange/amber/green gradient instead of the app's
+   blue/cyan brand-gradient, which stays reserved for the actual product
+   (nav, dashboard). Two different moods for two different jobs. */
+.landing-font {
+    font-family: 'Baloo 2', 'Hanken Grotesk', sans-serif;
+}
+.landing-heading-gradient {
+    background: linear-gradient(120deg, #f59e0b, #65a30d);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+.landing-cta-gradient {
+    background: linear-gradient(135deg, #f59e0b, #fde047);
+    color: #1c1a12;
+}
+.landing-stat-color {
+    color: #f59e0b;
+}
+.dark .landing-stat-color {
+    color: #fbbf24;
+}
+
+.landing-icon-badge {
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+}
+.dark .landing-icon-badge {
+    background: rgba(251, 191, 36, 0.16);
+    color: #fbbf24;
+}
+
+/* Warm nav accents for the post-login dashboard shell (top nav strip that
+   replaced the old blue-tinted left sidebar) - same amber/gold language as
+   the landing page's CTA, kept out of the deeper data-viz surfaces. */
+.landing-nav-active {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+}
+.dark .landing-nav-active {
+    background: rgba(251, 191, 36, 0.18);
+    color: #fbbf24;
+}
+.landing-nav-active-bar {
+    background: linear-gradient(135deg, #f59e0b, #fde047);
+}
+

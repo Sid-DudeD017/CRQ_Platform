@@ -10,10 +10,11 @@ fields (tx_hash/on_chain/board_approved) added alongside it.
 Compatibility notes:
 - Base = SQLModel included for backward compatibility.
 - NetworkTopology is replaced by NetworkEdge.
-- RiskDecision logs /api/audit's decisions, including whether they made it
-  onto the local blockchain (tx_hash/on_chain, filled in shortly after
-  creation - see trigger_blockchain_webhook in main.py) and whether board
-  approval was recorded for the decision (board_approved - RBI mandate).
+- RiskDecision logs /api/audit's decisions, including whether they've been
+  committed to the blockchain (tx_hash/on_chain, set only when someone
+  explicitly opts in via POST /api/audit-log/{id}/commit-chain from the
+  Ledger page - see that endpoint in main.py) and whether board approval
+  was recorded for the decision (board_approved - RBI mandate).
 """
 from datetime import datetime
 from enum import Enum
@@ -45,6 +46,20 @@ class Asset(SQLModel, table=True):
     ip_address: Optional[str] = None
     data_classification: Optional[str] = None
     business_criticality: Optional[str] = None
+
+    # [Own-Data / Demo isolation] 'predefined' (the randomized demo fleet
+    # from generators.populate_database, called by POST /api/generate-
+    # mock-data) or 'own' (the small starter fleet generators.
+    # ensure_own_data_baseline seeds for the Ingestion Engine dashboard).
+    # Previously this table had no such dimension at all - every /api/
+    # simulate-risk call, demo or own-data, read the exact same global
+    # rows, which is why the two dashboards always produced the same FAIR
+    # inputs no matter what you uploaded. See risk_engine.derive_fair_
+    # inputs' data_source param. Defaults to 'predefined' so pre-existing
+    # rows (data_source=NULL after this column is added to an existing
+    # database) keep resolving as demo data - see the OR-NULL matching in
+    # derive_fair_inputs/generators.populate_database.
+    data_source: str = Field(default="predefined")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -92,6 +107,13 @@ class TelemetryLog(SQLModel, table=True):
     source: str = "vulnerability_scanner"
     metadata_log: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
+    # [Own-Data / Demo isolation] Same 'predefined'/'own' dimension as
+    # Asset.data_source (see that field's comment) - kept directly on
+    # TelemetryLog rather than requiring a join through asset_id, since
+    # derive_fair_inputs' latest_logs query needs to filter by mode
+    # directly.
+    data_source: str = Field(default="predefined")
+
 class NetworkEdge(SQLModel, table=True):
     """
     A weighted asset-to-asset network link. /api/topology turns these into
@@ -132,6 +154,12 @@ class RiskSimulation(SQLModel, table=True):
     sebi_resilience: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     risk_drivers: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     framework_coverage: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    # [Own-Data / Demo isolation] Which dashboard this run came from -
+    # 'predefined' or 'own', mirrors RiskDecision.data_source below. Lets
+    # GET /api/simulations (the Reports page's run history) show two
+    # distinct trend lines instead of interleaving demo and own-data runs
+    # in one undifferentiated history.
+    data_source: str = Field(default="predefined")
 
 class RiskDecision(SQLModel, table=True):
     """Audit record behind /api/audit."""
@@ -143,6 +171,14 @@ class RiskDecision(SQLModel, table=True):
     tx_hash: Optional[str] = None
     on_chain: bool = False
     board_approved: bool = False  # [RBI MANDATE] set from AuditRequest.board_approved
+    # [Separate ledgers per dashboard] 'predefined' (demo Overview) or
+    # 'own' (Ingestion Engine) - previously every decision landed in one
+    # undifferentiated table, so accepting risk on demo telemetry and on
+    # someone's real ingested config showed up as the exact same ledger
+    # with no way to tell which was which. Defaults to 'predefined' so
+    # existing rows from before this column existed still resolve
+    # somewhere sensible. See main.py's /api/audit and /api/audit-log.
+    data_source: str = Field(default="predefined")
 
 class IngestedMapping(SQLModel, table=True):
     """
@@ -164,6 +200,14 @@ class IngestedMapping(SQLModel, table=True):
     severity: str = "info"         # "info" | "warning" | "critical"
     confirmed_by: str              # from the verified JWT, never the request body
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    # [Own-Data / Demo isolation] Always 'own' in practice - the Ingestion
+    # Engine (and therefore /api/ingest/confirm) only exists on the
+    # own-data dashboard, so every confirmed mapping is real-environment
+    # evidence, never demo telemetry. Stored explicitly (rather than
+    # assumed) so derive_fair_inputs' gap_deduction can filter by it the
+    # same way as Asset/TelemetryLog, instead of applying every confirmed
+    # gap to BOTH dashboards' Control Strength the way it used to.
+    data_source: str = Field(default="own")
 
 class IncidentRecord(SQLModel, table=True):
     """
@@ -241,6 +285,23 @@ class TrainingRecord(SQLModel, table=True):
     module: str = Field(index=True)         # one of risk_engine.TRAINING_MODULE_IDS
     completed_by: str = Field(index=True)   # from the verified JWT, never the request body
     completed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class User(SQLModel, table=True):
+    """
+    A real registered account created via POST /api/auth/signup - separate
+    from the two hardcoded DEMO_USERS in backend/security.py (kept working
+    alongside this for the existing demo-login buttons). This is what
+    makes "create an account, log in again later" persist for real,
+    per-visitor users instead of only the two fixed hackathon roles.
+    Password is bcrypt-hashed (see security.hash_password) - never stored
+    or compared in plaintext.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(index=True, unique=True)
+    hashed_password: str
+    name: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # Compatibility alias

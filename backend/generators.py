@@ -6,8 +6,8 @@ import random
 from datetime import datetime, timedelta
 
 from faker import Faker
-from sqlalchemy import delete
-from sqlmodel import Session
+from sqlalchemy import delete, or_
+from sqlmodel import Session, select
 
 from .models import Asset, EDRStatus, NetworkEdge, TelemetryLog, ThreatLevel
 
@@ -166,11 +166,27 @@ def generate_network_edges(assets: list, extra_cross_unit_edges: int = 8) -> lis
 
 
 def populate_database(db: Session):
-    """Clear and repopulate Asset/TelemetryLog/NetworkEdge with fresh mock data."""
+    """
+    Clear and repopulate the DEMO ('predefined') fleet only.
+
+    [Own-Data / Demo isolation] This used to unconditionally wipe every
+    Asset/TelemetryLog/NetworkEdge row in the database before
+    regenerating - harmless when only demo data ever existed, but once
+    the Ingestion Engine dashboard has its own 'own'-tagged Asset/
+    TelemetryLog rows (see generate_own_data_seed/ensure_own_data_baseline
+    below), clicking "Generate Demo Data" would silently delete someone's
+    real ingested environment along with the demo fleet. Now scoped to
+    rows tagged 'predefined' (or NULL, for rows created before this
+    column existed) so it only ever touches the demo side. NetworkEdge has
+    no data_source of its own - only the demo fleet ever creates edges
+    (see generate_network_edges), so clearing all of them here stays safe.
+    """
     try:
-        db.execute(delete(TelemetryLog))
+        predefined_assets = or_(Asset.data_source == "predefined", Asset.data_source.is_(None))
+        predefined_logs = or_(TelemetryLog.data_source == "predefined", TelemetryLog.data_source.is_(None))
+        db.execute(delete(TelemetryLog).where(predefined_logs))
         db.execute(delete(NetworkEdge))
-        db.execute(delete(Asset))
+        db.execute(delete(Asset).where(predefined_assets))
         db.commit()
 
         assets = generate_mock_assets(num_assets=25)
@@ -189,3 +205,89 @@ def populate_database(db: Session):
     except Exception as e:
         db.rollback()
         return False, str(e)
+
+
+def generate_own_data_seed():
+    """
+    [Own-Data / Demo isolation] A small, fixed (not randomized) starter
+    fleet for the "Enter your own data" dashboard, seeded once before any
+    config has been uploaded through the Ingestion Engine. Deliberately
+    moderate/neutral - not artificially clean, not artificially bad -
+    because what's supposed to actually move this baseline is confirmed
+    Ingestion Engine findings (see risk_engine.derive_fair_inputs'
+    gap_deduction) and Training coverage, not randomization. Kept separate
+    from generate_mock_assets' 25-asset randomized demo fleet so the two
+    dashboards start from genuinely different data instead of secretly
+    sharing one global pool.
+    """
+    assets = [
+        Asset(id="OWN-001", name="Core Edge Router", asset_type="Gateway",
+              business_unit="Cloud Infrastructure", business_value=180000.0,
+              criticality_score=70, ip_address="10.20.0.1",
+              data_classification="Public", business_criticality="Tier 1"),
+        Asset(id="OWN-002", name="Core Distribution Switch", asset_type="Server",
+              business_unit="Corporate IT", business_value=90000.0,
+              criticality_score=60, ip_address="10.20.0.2",
+              data_classification="Internal", business_criticality="Tier 2"),
+        Asset(id="OWN-003", name="Application Server", asset_type="Server",
+              business_unit="Retail Operations", business_value=140000.0,
+              criticality_score=65, ip_address="10.20.1.10",
+              data_classification="Internal", business_criticality="Tier 2"),
+        Asset(id="OWN-004", name="Customer Database", asset_type="Database",
+              business_unit="Customer Data Platform", business_value=650000.0,
+              criticality_score=90, ip_address="10.20.1.20",
+              data_classification="PII", business_criticality="Tier 1"),
+        Asset(id="OWN-005", name="Public WAN Gateway", asset_type="Gateway",
+              business_unit="Cloud Infrastructure", business_value=160000.0,
+              criticality_score=75, ip_address="203.0.113.1",
+              data_classification="Public", business_criticality="Tier 1"),
+        Asset(id="OWN-006", name="Employee Endpoint Fleet", asset_type="Laptop",
+              business_unit="HR & Payroll", business_value=45000.0,
+              criticality_score=35, ip_address="10.20.9.0",
+              data_classification="Internal", business_criticality="Tier 3"),
+    ]
+    for a in assets:
+        a.data_source = "own"
+
+    def _log(asset_id, vuln, mfa=True, patch="Up-to-date", cvss=0.0, exposure=False, misconfig=0):
+        return TelemetryLog(
+            asset_id=asset_id, vulnerability_score=vuln, threat_level=ThreatLevel.MEDIUM,
+            edr_status=EDRStatus.ACTIVE, source="vulnerability_scanner",
+            cvss_score=cvss, patch_status=patch,
+            event_frequency_24h=1, anomalous_access_flags=0, incident_alert_level="LOW",
+            privilege_level="Standard", excessive_permissions=False, mfa_active=mfa,
+            edr_health_status="Healthy", host_compromise_flags=False, malware_alerts_24h=0,
+            public_exposure_flag=exposure, cloud_misconfigurations_count=misconfig,
+            cisa_kev_presence=False, threat_actor_chatter="None", data_source="own",
+        )
+
+    logs = [
+        _log("OWN-001", 5.5, exposure=True),
+        _log("OWN-002", 4.5),
+        _log("OWN-003", 5.0),
+        _log("OWN-004", 5.5, mfa=True),
+        _log("OWN-005", 6.0, exposure=True, misconfig=1),
+        _log("OWN-006", 4.0),
+    ]
+    return assets, logs
+
+
+def ensure_own_data_baseline(db: Session) -> bool:
+    """
+    Lazily seeds generate_own_data_seed()'s starter fleet exactly once,
+    the first time anything asks for 'own' data (see risk_engine.
+    derive_fair_inputs). Checked by existence, never wipes or re-seeds -
+    unlike populate_database above, this must never clobber real Asset/
+    TelemetryLog state that a user's own Ingestion Engine confirmations
+    may already be influencing. Returns True if it just seeded, False if
+    'own' data already existed.
+    """
+    existing = db.exec(select(Asset).where(Asset.data_source == "own")).first()
+    if existing:
+        return False
+    assets, logs = generate_own_data_seed()
+    db.add_all(assets)
+    db.commit()
+    db.add_all(logs)
+    db.commit()
+    return True

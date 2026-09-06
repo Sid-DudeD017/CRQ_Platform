@@ -13,6 +13,7 @@ interface Decision {
     created_at: string;
     tx_hash: string | null;
     on_chain: boolean;
+    data_source?: string | null;
 }
 
 function truncateHash(hash: string) {
@@ -21,7 +22,7 @@ function truncateHash(hash: string) {
 }
 
 export default function LedgerPage() {
-    const { token } = useAuth();
+    const { token, username } = useAuth();
     const { showToast } = useToast();
     const [decisions, setDecisions] = useState<Decision[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -30,12 +31,35 @@ export default function LedgerPage() {
     const [isClearModalOpen, setIsClearModalOpen] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
     const [clearError, setClearError] = useState<string | null>(null);
+    const [committingId, setCommittingId] = useState<number | null>(null);
+
+    // [Separate ledgers per dashboard] Demo (Overview) and Own Data
+    // (Ingestion Engine) each get their own ledger now instead of one
+    // undifferentiated table - which one this account is currently on
+    // decides which ledger loads here, read the same hydration-safe way
+    // SharedLayout does (crq_data_source:<username>) so this never
+    // flashes the wrong dashboard's decisions before settling.
+    const [dataSourceHydrated, setDataSourceHydrated] = useState(false);
+    const [dataSource, setDataSource] = useState<'predefined' | 'own'>('predefined');
+    useEffect(() => {
+        if (!username) {
+            setDataSourceHydrated(true);
+            return;
+        }
+        try {
+            const stored = localStorage.getItem(`crq_data_source:${username}`);
+            setDataSource(stored === 'own' ? 'own' : 'predefined');
+        } catch (e) {
+            // localStorage unavailable - fall back to the demo ledger.
+        }
+        setDataSourceHydrated(true);
+    }, [username]);
 
     const fetchLedger = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -45,9 +69,10 @@ export default function LedgerPage() {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [dataSource]);
 
     useEffect(() => {
+        if (!dataSourceHydrated) return;
         fetchLedger();
 
         // Defense in depth against the Next.js Router Cache serving a
@@ -64,7 +89,7 @@ export default function LedgerPage() {
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisibility);
         };
-    }, [fetchLedger]);
+    }, [dataSourceHydrated, fetchLedger]);
 
     const clearLedger = async () => {
         setClearError(null);
@@ -76,7 +101,7 @@ export default function LedgerPage() {
         }
         setIsClearing(true);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/audit-log`, {
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` },
             });
@@ -84,7 +109,7 @@ export default function LedgerPage() {
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions([]);
             setIsClearModalOpen(false);
-            showToast(`Cleared ${data.deleted} decision${data.deleted === 1 ? '' : 's'} - the ledger is back to 0.`, 'success');
+            showToast(`Cleared ${data.deleted} decision${data.deleted === 1 ? '' : 's'} from the ${dataSource === 'own' ? 'Own Data' : 'Demo'} ledger - back to 0.`, 'success');
         } catch (e: any) {
             console.error(e);
             const message = e.message || 'Could not clear the ledger. Is the backend running on port 8000?';
@@ -101,6 +126,36 @@ export default function LedgerPage() {
         setTimeout(() => setCopiedId(null), 1500);
     };
 
+    // [Opt-in blockchain commit] Accepting a risk on Overview only ever
+    // writes the decision off-chain now - this is the explicit choice the
+    // user makes here, per decision, once they've reviewed it in the
+    // ledger: commit it to the AuditLedger smart contract, or leave it
+    // off-chain. Mirrors backend/main.py's POST
+    // /api/audit-log/{id}/commit-chain, which no longer fires
+    // automatically in the background on every acceptance.
+    const connectToBlockchain = async (id: number) => {
+        if (!token) {
+            showToast('You need to be logged in as CISO or CFO (top-right corner) to commit a decision on-chain.', 'error');
+            return;
+        }
+        setCommittingId(id);
+        try {
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log/${id}/commit-chain`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+            setDecisions((prev) => prev.map((d) => (d.id === id ? { ...d, tx_hash: data.tx_hash, on_chain: true } : d)));
+            showToast(`Decision #${id} committed on-chain.`, 'success');
+        } catch (e: any) {
+            console.error(e);
+            showToast(e.message || `Could not reach the blockchain. The decision stays logged off-chain - try again shortly.`, 'error');
+        } finally {
+            setCommittingId(null);
+        }
+    };
+
     const totalRisk = decisions.reduce((sum, d) => sum + (d.risk_accepted || 0), 0);
     const onChainCount = decisions.filter((d) => d.on_chain).length;
 
@@ -108,9 +163,14 @@ export default function LedgerPage() {
         <div className="max-w-[1100px] mx-auto flex flex-col gap-stack-lg">
             <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
                 <div>
-                    <h1 className="font-headline-md text-headline-md text-primary mb-1">Detailed Ledger</h1>
+                    <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-1">
+                        {dataSource === 'own' ? 'Own Data Ledger' : 'Demo Ledger'}
+                    </h1>
                     <p className="font-body-md text-body-md text-on-surface-variant">
-                        Every risk-acceptance decision, persisted to the database and committed to the on-chain audit trail where available.
+                        {dataSource === 'own'
+                            ? "Every risk-acceptance decision logged from your ingested data, persisted to the database and kept separate from the demo dashboard's ledger below."
+                            : 'Every risk-acceptance decision logged from the demo dashboard, persisted to the database and kept separate from the Own Data ledger.'}
+                        {' '}Review one and choose whether to commit it to the on-chain audit trail.
                     </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -170,7 +230,9 @@ export default function LedgerPage() {
                 ) : decisions.length === 0 ? (
                     <div className="p-gutter text-center">
                         <span className="material-symbols-outlined text-[40px] text-outline mb-2">receipt_long</span>
-                        <p className="font-body-sm text-body-sm text-on-surface-variant">No risk decisions logged yet - click &quot;Accept Risk&quot; on the Overview page to create one.</p>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">
+                            No {dataSource === 'own' ? 'own-data' : 'demo'} risk decisions logged yet - click &quot;Accept Risk&quot; on the {dataSource === 'own' ? 'Ingestion Engine' : 'Overview'} page to create one.
+                        </p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -208,10 +270,25 @@ export default function LedgerPage() {
                                                     {copiedId === d.id ? 'Copied!' : truncateHash(d.tx_hash)}
                                                 </button>
                                             ) : (
-                                                <span className="flex items-center gap-1 px-2 py-1 bg-surface-container text-on-surface-variant rounded font-label-caps text-label-caps">
-                                                    <span className="material-symbols-outlined text-[14px]">database</span>
-                                                    Off-chain
-                                                </span>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="flex items-center gap-1 px-2 py-1 bg-surface-container text-on-surface-variant rounded font-label-caps text-label-caps">
+                                                        <span className="material-symbols-outlined text-[14px]">database</span>
+                                                        Off-chain
+                                                    </span>
+                                                    <button
+                                                        onClick={() => connectToBlockchain(d.id)}
+                                                        disabled={committingId === d.id}
+                                                        title={!token ? 'Log in (top-right) to commit this decision on-chain' : 'Commit this decision to the AuditLedger smart contract'}
+                                                        className="flex items-center gap-1 px-2 py-1 landing-cta-gradient rounded font-label-caps text-label-caps font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 whitespace-nowrap"
+                                                    >
+                                                        {committingId === d.id ? (
+                                                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                                                        ) : (
+                                                            <span className="material-symbols-outlined text-[14px]">link</span>
+                                                        )}
+                                                        {committingId === d.id ? 'Connecting...' : 'Connect to Blockchain'}
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -222,7 +299,7 @@ export default function LedgerPage() {
                 )}
             </div>
 
-            <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
+            <a href={dataSource === 'own' ? '/ingestion' : '/overview'} className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
 

@@ -17,9 +17,22 @@ def run_fair_monte_carlo(
     # 2. Simulate Vulnerability (Probability that a Threat Event becomes a Loss Event)
     threat_cap = np.random.triangular(tc_min, tc_mode, tc_max, num_simulations)
     control_str = np.random.triangular(cs_min, cs_mode, cs_max, num_simulations)
-    
-    # Vulnerability is the probability TC > CS, scaled
-    vulnerability = np.where(threat_cap > control_str, np.random.uniform(0.6, 0.9, num_simulations), np.random.uniform(0.1, 0.4, num_simulations))
+
+    # Vulnerability is the probability TC > CS, scaled - smoothed into a
+    # logistic function of the gap between the two instead of a hard
+    # "threat_cap > control_str" threshold. A hard threshold meant Control
+    # Strength had to climb all the way past Threat Capability's entire
+    # distribution (mode 60) before a Strategic Control toggle changed
+    # anything - realistically-achievable Control Strength rarely gets
+    # anywhere near that, which is exactly why toggling controls used to
+    # barely move ALE/VaR. A logistic gap makes every point of Control
+    # Strength gained smoothly and immediately reduce the probability of
+    # the "high vulnerability" draw, instead of needing to cross a cliff
+    # that's nearly unreachable in practice.
+    gap = (control_str - threat_cap) / 15.0
+    p_high_vulnerability = 1.0 / (1.0 + np.exp(gap))
+    is_high_vulnerability = np.random.uniform(0.0, 1.0, num_simulations) < p_high_vulnerability
+    vulnerability = np.where(is_high_vulnerability, np.random.uniform(0.6, 0.9, num_simulations), np.random.uniform(0.1, 0.4, num_simulations))
     
     # 3. Calculate Loss Event Frequency (LEF) = TEF * Vulnerability
     lef = tef * vulnerability

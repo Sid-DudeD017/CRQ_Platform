@@ -82,7 +82,7 @@ export default function SupportPage() {
                 </div>
             </div>
 
-            <a href="/" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
+            <a href="/overview" className="self-start bg-primary text-on-primary px-4 py-2 rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">
                 Back to Dashboard
             </a>
         </div>

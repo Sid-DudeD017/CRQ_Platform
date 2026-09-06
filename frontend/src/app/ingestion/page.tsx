@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import RiskSandbox, { STRATEGIC_CONTROLS } from '@/components/RiskSandbox';
 
 interface Finding {
     line_number: number;
@@ -26,8 +27,26 @@ const SEVERITY_STYLES: Record<Finding['severity'], { badge: string; label: strin
 };
 
 export default function IngestionPage() {
-    const { token } = useAuth();
+    const { token, username } = useAuth();
     const { showToast } = useToast();
+
+    // [Report saved each time] One localStorage blob per account holds
+    // everything needed to pick up exactly where you left off - the
+    // uploaded file, its review progress, and the sandbox's last run -
+    // so switching to Demo or Training via "Switch Dashboard" and coming
+    // back here doesn't lose any of it. Merges into whatever's already
+    // saved rather than overwriting the whole blob on every call.
+    const persistIngestionState = useCallback((patch: Record<string, any>) => {
+        if (!username) return;
+        try {
+            const key = `crq_sim_state:${username}:own`;
+            const raw = localStorage.getItem(key);
+            const existing = raw ? JSON.parse(raw) : {};
+            localStorage.setItem(key, JSON.stringify({ ...existing, ...patch }));
+        } catch (e) {
+            // Non-critical - worst case a revisit starts from scratch.
+        }
+    }, [username]);
 
     const [fileName, setFileName] = useState<string | null>(null);
     const [rawContent, setRawContent] = useState<string>('');
@@ -37,6 +56,178 @@ export default function IngestionPage() {
     const [isDragOver, setIsDragOver] = useState(false);
     const [trainedCount, setTrainedCount] = useState<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // [Own-data dashboard] This is the full Simulation Sandbox from the
+    // demo Overview page - budget slider, Strategic Controls, ALE/VaR/Loss
+    // Distribution, Explainable Risk Attribution, Business Unit breakdown -
+    // reused via the shared RiskSandbox component so ingesting your own
+    // data leads to the exact same working dashboard the demo gets, just
+    // calibrated on what you actually confirmed below instead of demo
+    // telemetry. Unlike Overview's runSimulation, this one never seeds
+    // mock data on a "no assets found" error - own-data mode only ever
+    // reflects what was actually ingested and confirmed.
+    const [budget, setBudget] = useState(50);
+    const [simResults, setSimResults] = useState<any>(null);
+    const [isSimulating, setIsSimulating] = useState(false);
+    const [controls, setControls] = useState<Record<string, boolean>>(
+        Object.fromEntries(STRATEGIC_CONTROLS.map((c) => [c.name, c.name === 'Enforce Cloud MFA']))
+    );
+    const [optimizerPicks, setOptimizerPicks] = useState<string[] | null>(null);
+    const [acceptingRiskFor, setAcceptingRiskFor] = useState<string | null>(null);
+    const [isApproving, setIsApproving] = useState(false);
+    const simRequestIdRef = useRef(0);
+    // [Deploy-level polish] Same pattern as the demo Overview dashboard -
+    // bumped on every simulation that returns new results and used as the
+    // RiskSandbox `key` so its result panels replay their entrance
+    // animation on every run, not just the first time data appears.
+    const [resultVersion, setResultVersion] = useState(0);
+    // Smooth-scrolled into view after a manual "Run Simulation" click.
+    const resultsRef = useRef<HTMLDivElement>(null);
+
+    const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setBudget(Number(e.target.value));
+    };
+
+    const toggleControl = (name: string) => {
+        setControls((prev) => ({ ...prev, [name]: !prev[name] }));
+    };
+
+    const applyRecommended = () => {
+        if (!optimizerPicks) return;
+        setControls((prev) => {
+            const next = { ...prev };
+            Object.keys(next).forEach((name) => {
+                next[name] = optimizerPicks.includes(name);
+            });
+            return next;
+        });
+        showToast(`Applied the recommended mix - ${optimizerPicks.length} of ${STRATEGIC_CONTROLS.length} controls. Run Simulation again to see its effect.`, 'info');
+    };
+
+    const runSimulation = useCallback(async (opts?: { silent?: boolean }) => {
+        const requestId = ++simRequestIdRef.current;
+        // [Deploy-level polish] Minimum perceived-work floor for manual
+        // runs only - see the elapsed-time check in `finally` below.
+        const startedAt = Date.now();
+        setIsSimulating(true);
+        try {
+            const budgetValue = (budget / 100) * 10000000;
+            const res = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ budget: budgetValue, active_controls: controls, data_source: 'own' }),
+            });
+            const data = await res.json();
+            if (requestId !== simRequestIdRef.current) return;
+            if (!res.ok) {
+                if (!opts?.silent) showToast(`Simulation failed: ${data.detail || res.status}`, 'error');
+                return;
+            }
+            setSimResults(data);
+            const picks: string[] = data.optimization.selected_patches || [];
+            setOptimizerPicks(picks);
+            persistIngestionState({ budget, controls, simResults: data, optimizerPicks: picks });
+            // [Deploy-level polish] Force a clean remount so results
+            // fade/slide in fresh on every run, and - manual runs only -
+            // smooth-scroll the regenerated sandbox into view.
+            setResultVersion((v) => v + 1);
+            if (!opts?.silent) {
+                requestAnimationFrame(() => {
+                    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
+            if (opts?.silent) {
+                showToast('Risk recalculated from your ingested data.', 'info');
+            } else {
+                showToast(`Simulation complete - ${picks.length} of ${STRATEGIC_CONTROLS.length} controls recommended within this budget.`, 'success');
+            }
+        } catch (e) {
+            if (requestId !== simRequestIdRef.current) return;
+            console.error(e);
+            if (!opts?.silent) showToast('Error running simulation. Ensure FastAPI is running on port 8000.', 'error');
+        } finally {
+            if (requestId === simRequestIdRef.current) {
+                // Same 0.5s perceived-work floor as the demo dashboard,
+                // skipped for silent auto-recalculation runs.
+                if (!opts?.silent) {
+                    const elapsed = Date.now() - startedAt;
+                    const minDelayMs = 500;
+                    if (elapsed < minDelayMs) {
+                        await new Promise((resolve) => setTimeout(resolve, minDelayMs - elapsed));
+                    }
+                }
+                setIsSimulating(false);
+            }
+        }
+    }, [budget, controls, showToast, persistIngestionState]);
+
+    const acceptRisk = async (label: string, riskAmountRupees: number) => {
+        if (!token) {
+            showToast('Please log in first (top-right corner) before accepting risk.', 'error');
+            return;
+        }
+        setAcceptingRiskFor(label);
+        try {
+            const res = await fetchWithRetry(`${API_BASE}/api/audit`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    action: `Accept residual risk: ${label}`,
+                    risk_accepted: riskAmountRupees,
+                    data_source: 'own',
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(`Could not log audit: ${data.detail || res.status}`, 'error');
+                return;
+            }
+            showToast(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id} - Decided by: ${data.decided_by}`, 'success');
+        } catch (e) {
+            console.error(e);
+            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+        } finally {
+            setAcceptingRiskFor(null);
+        }
+    };
+
+    const approveOptimizer = async () => {
+        if (!simResults?.optimization) return;
+        if (!token) {
+            showToast('Please log in first (top-right corner) before approving the plan.', 'error');
+            return;
+        }
+        setIsApproving(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/audit`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    action: `Approve AI Optimization Plan: ${(simResults.optimization.selected_patches || []).join(', ')}`,
+                    risk_accepted: simResults.optimization.total_cost || 0,
+                    board_approved: true,
+                    data_source: 'own',
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
+                return;
+            }
+            showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
+        } catch (e) {
+            console.error(e);
+            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+        } finally {
+            setIsApproving(false);
+        }
+    };
 
     const fetchTrainedCount = useCallback(async () => {
         try {
@@ -53,9 +244,51 @@ export default function IngestionPage() {
         fetchTrainedCount();
     }, [fetchTrainedCount]);
 
+    // [Report saved each time] Restore the last saved upload + review +
+    // sandbox run for this account instead of starting blank every time
+    // this page is revisited.
+    useEffect(() => {
+        if (!username) return;
+        let cached: any = null;
+        try {
+            const raw = localStorage.getItem(`crq_sim_state:${username}:own`);
+            if (raw) cached = JSON.parse(raw);
+        } catch (e) {}
+        if (!cached) return;
+        if (typeof cached.fileName === 'string') setFileName(cached.fileName);
+        if (typeof cached.rawContent === 'string') setRawContent(cached.rawContent);
+        if (Array.isArray(cached.items)) setItems(cached.items);
+        if (typeof cached.budget === 'number') setBudget(cached.budget);
+        if (cached.controls) setControls(cached.controls);
+        if (cached.simResults) setSimResults(cached.simResults);
+        if (cached.optimizerPicks) setOptimizerPicks(cached.optimizerPicks);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [username]);
+
     const activeIndex = items.findIndex((it) => it.status === 'pending');
     const active = activeIndex >= 0 ? items[activeIndex] : null;
     const reviewedCount = items.filter((it) => it.status !== 'pending').length;
+    // [Step by step] The sandbox (Monte Carlo graph, ALE/VaR, Accept Risk)
+    // only appears once every detected finding has been confirmed or
+    // ignored - or immediately if the parser found nothing to review, so
+    // an empty file doesn't get stuck. Reviewing first, results second,
+    // instead of showing a half-calibrated sandbox before you've told it
+    // what's actually true about your environment.
+    const reviewComplete = items.length === 0 || active === null;
+
+    // [Step by step] Fires once, right when the last pending finding gets
+    // confirmed/ignored and the sandbox first appears - scrolls it into
+    // view so finishing the review visibly "generates" the Monte Carlo
+    // graph instead of leaving it to appear silently further down the page.
+    const wasReviewCompleteRef = useRef(false);
+    useEffect(() => {
+        if (reviewComplete && items.length > 0 && !wasReviewCompleteRef.current) {
+            requestAnimationFrame(() => {
+                resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+        wasReviewCompleteRef.current = reviewComplete;
+    }, [reviewComplete, items.length]);
 
     const parseText = useCallback(async (name: string, content: string) => {
         setIsParsing(true);
@@ -73,7 +306,15 @@ export default function IngestionPage() {
             setFileName(name);
             setRawContent(data.raw_content);
             const findings: Finding[] = data.findings || [];
-            setItems(findings.map((f) => ({ ...f, status: 'pending' as const })));
+            const newItems: ReviewItem[] = findings.map((f) => ({ ...f, status: 'pending' as const }));
+            setItems(newItems);
+            // Baseline reading for the sandbox below - taken right away
+            // so it has something to show (and something to diff against)
+            // before the first mapping is even confirmed.
+            setSimResults(null);
+            setOptimizerPicks(null);
+            persistIngestionState({ fileName: name, rawContent: data.raw_content, items: newItems, simResults: null, optimizerPicks: null });
+            runSimulation({ silent: true });
             if (findings.length === 0) {
                 showToast('Parsed the file, but found no recognized security-relevant directives in it.', 'info');
             } else {
@@ -85,7 +326,7 @@ export default function IngestionPage() {
         } finally {
             setIsParsing(false);
         }
-    }, [showToast]);
+    }, [showToast, runSimulation, persistIngestionState]);
 
     const handleFile = useCallback((file: File) => {
         const reader = new FileReader();
@@ -139,19 +380,23 @@ export default function IngestionPage() {
                 showToast(`Could not confirm mapping: ${data.detail || res.status}`, 'error');
                 return;
             }
-            setItems((prev) => prev.map((it, i) => (i === activeIndex ? { ...it, status: 'confirmed' } : it)));
+            const updatedItems = items.map((it, i) => (i === activeIndex ? { ...it, status: 'confirmed' as const } : it));
+            setItems(updatedItems);
+            persistIngestionState({ items: updatedItems });
             // Confirmed control_gap findings feed directly into the FAIR risk
             // calc as an always-on Control Strength deduction (see
             // backend/risk_engine.py::derive_fair_inputs) - the toast makes
             // that visible instead of implying this is just a label saved
-            // for later training.
+            // for later training, and the sandbox below shows the actual
+            // number moving, not just a claim that it did.
             showToast(
                 active.kind === 'control_gap'
-                    ? `Gap confirmed: ${active.parameter} - this will raise simulated risk on the Overview dashboard.`
+                    ? `Gap confirmed: ${active.parameter} - risk updated below.`
                     : `Mapping trained: ${active.parameter}`,
                 'success'
             );
             fetchTrainedCount();
+            runSimulation({ silent: true });
         } catch (e) {
             console.error(e);
             showToast('Error contacting backend. Is it running on port 8000?', 'error');
@@ -162,7 +407,9 @@ export default function IngestionPage() {
 
     const ignoreActive = () => {
         if (!active) return;
-        setItems((prev) => prev.map((it, i) => (i === activeIndex ? { ...it, status: 'ignored' } : it)));
+        const updatedItems = items.map((it, i) => (i === activeIndex ? { ...it, status: 'ignored' as const } : it));
+        setItems(updatedItems);
+        persistIngestionState({ items: updatedItems });
     };
 
     const rescan = () => {
@@ -179,7 +426,7 @@ export default function IngestionPage() {
                 {/* Page Header */}
                 <div className="flex justify-between items-end flex-wrap gap-stack-sm">
                     <div>
-                        <h1 className="font-headline-md text-headline-md text-primary">Ingestion Engine</h1>
+                        <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient">Ingestion Engine</h1>
                         <p className="font-body-md text-body-md text-on-surface-variant mt-1">
                             Upload a raw device config; a rule-based parser finds the security-relevant lines and proposes standard compliance mappings for you to confirm.
                         </p>
@@ -311,7 +558,7 @@ export default function IngestionPage() {
                                         <p className="font-body-sm text-[12px] text-on-surface-variant mt-3 pt-3 border-t border-outline-variant italic">{active.rationale}</p>
                                         <div className="mt-4 flex justify-end gap-2">
                                             <button onClick={ignoreActive} className="font-body-sm text-body-sm px-3 py-1.5 text-on-surface-variant hover:text-primary transition-colors">Ignore</button>
-                                            <button onClick={confirmActive} disabled={isConfirming} className="font-body-sm text-body-sm px-4 py-1.5 bg-primary text-on-primary rounded hover:opacity-90 transition-opacity shadow-sm disabled:opacity-50">
+                                            <button onClick={confirmActive} disabled={isConfirming} className="font-body-sm text-body-sm font-bold px-4 py-1.5 landing-cta-gradient rounded hover:opacity-90 transition-opacity shadow-sm disabled:opacity-50">
                                                 {isConfirming ? 'Confirming...' : 'Confirm Mapping'}
                                             </button>
                                         </div>
@@ -336,6 +583,50 @@ export default function IngestionPage() {
                     <div className="border border-dashed border-outline-variant rounded p-stack-lg text-center text-on-surface-variant font-body-sm text-body-sm opacity-70">
                         Upload a config file above to see raw input and proposed mappings here.
                     </div>
+                )}
+                {fileName && !reviewComplete && (
+                    <div className="border border-dashed border-outline-variant rounded-xl p-stack-lg text-center bg-surface-container-lowest/50 flex flex-col items-center gap-2">
+                        <span className="material-symbols-outlined text-[28px] text-primary animate-pulse">schema</span>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant max-w-md">
+                            Confirm or ignore each finding on the right first - your risk sandbox and Monte Carlo simulation will appear here once all {items.length} are reviewed ({reviewedCount}/{items.length} so far).
+                        </p>
+                    </div>
+                )}
+
+                {/* Full Simulation Sandbox - the exact same working
+                    dashboard the demo Overview page runs (budget slider,
+                    Strategic Controls, ALE/VaR/Loss Distribution,
+                    Explainable Risk Attribution, Business Unit breakdown),
+                    just calibrated on what's actually been ingested and
+                    confirmed here instead of demo telemetry. Appears once
+                    a file is uploaded and recalculates every time a
+                    mapping is confirmed or a control is toggled. */}
+                {fileName && reviewComplete && (
+                    <section className="animate-fade-scale-in">
+                        <div className="mb-stack-md">
+                            <h2 className="font-headline-sm text-headline-sm landing-font landing-heading-gradient">Your Risk Sandbox</h2>
+                            <p className="font-body-sm text-body-sm text-on-surface-variant">Same FAIR engine as the demo dashboard - calibrated only on the data you ingest and confirm here.</p>
+                        </div>
+                        <div ref={resultsRef}>
+                        <RiskSandbox
+                            runVersion={resultVersion}
+                            sandboxMode="whatIf"
+                            simResults={simResults}
+                            isSimulating={isSimulating}
+                            budget={budget}
+                            handleBudgetChange={handleBudgetChange}
+                            controls={controls}
+                            toggleControl={toggleControl}
+                            optimizerPicks={optimizerPicks}
+                            applyRecommended={applyRecommended}
+                            approveOptimizer={approveOptimizer}
+                            isApproving={isApproving}
+                            runSimulation={runSimulation}
+                            acceptRisk={acceptRisk}
+                            acceptingRiskFor={acceptingRiskFor}
+                        />
+                        </div>
+                    </section>
                 )}
             </div>
         </>
