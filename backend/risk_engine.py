@@ -857,7 +857,7 @@ def derive_fair_inputs(
     latest_telemetry_at = max((log.timestamp for log in latest_logs), default=None)
 
     _fair_inputs_for_provenance = {
-        "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
+        "tef_min": min(base_tef, max(5.0, base_tef - 20)), "tef_mode": base_tef, "tef_max": base_tef + 50,
         "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
         "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
         "plm_min": (base_plm * 0.5) / loss_variance_multiplier, "plm_mode": base_plm, "plm_max": (base_plm * 2.0) * loss_variance_multiplier,
@@ -909,7 +909,7 @@ def derive_fair_inputs(
     }
 
     return {
-        "tef_min": max(5.0, base_tef - 20), "tef_mode": base_tef, "tef_max": base_tef + 50,
+        "tef_min": min(base_tef, max(5.0, base_tef - 20)), "tef_mode": base_tef, "tef_max": base_tef + 50,
         "tc_min": 20.0, "tc_mode": 60.0, "tc_max": 95.0,
         "cs_min": max(5.0, avg_cs - 15), "cs_mode": avg_cs, "cs_max": min(100.0, avg_cs + 10),
         "plm_min": (base_plm * 0.5) / loss_variance_multiplier, "plm_mode": base_plm, "plm_max": (base_plm * 2.0) * loss_variance_multiplier,
