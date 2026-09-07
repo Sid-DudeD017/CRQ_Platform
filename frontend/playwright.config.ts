@@ -25,13 +25,22 @@ export default defineConfig({
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
     },
+    // In CI, a freshly-spawned `next dev` compiles each route on its
+    // first request. On a shared/CPU-constrained CI runner that
+    // on-demand compile can take longer than an individual test's own
+    // assertion timeout, which is what was making the e2e suite fail in
+    // GitHub Actions while passing locally (where routes are usually
+    // already compiled from prior dev-server use). Building once and
+    // serving the compiled output with `next start` removes that
+    // variability. Locally we keep `next dev` with reuseExistingServer
+    // so iterating on a test doesn't require a full rebuild every time.
     webServer: process.env.PLAYWRIGHT_BASE_URL
         ? undefined
         : {
-              command: 'npm run dev',
+              command: process.env.CI ? 'npm run build && npm run start' : 'npm run dev',
               url: 'http://localhost:3000',
-              reuseExistingServer: true,
-              timeout: 60_000,
+              reuseExistingServer: !process.env.CI,
+              timeout: 180_000,
           },
     projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });
