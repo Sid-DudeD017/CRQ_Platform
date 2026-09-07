@@ -274,7 +274,13 @@ function QuickCheck({ quiz }: { quiz: QuizQuestion }) {
                             key={i}
                             type="button"
                             onClick={() => setSelected(i)}
-                            disabled={selected !== null}
+                            // [Retry on a wrong answer - fix] Previously every
+                            // option locked forever after the first pick, right
+                            // or wrong, so a wrong guess had no way to try
+                            // again. Only the correct pick now ends the
+                            // question - a wrong one stays clickable so the
+                            // learner can keep trying.
+                            disabled={isCorrect}
                             aria-pressed={isSelected}
                             className={`text-left font-body-sm text-body-sm px-3 py-2 rounded border transition-colors disabled:cursor-default ${style}`}
                         >

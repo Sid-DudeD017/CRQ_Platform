@@ -341,7 +341,7 @@ export default function LedgerPage() {
             {serviceStatus?.blockchain === 'unavailable' && (
                 <div className="flex items-start gap-2 px-3 py-2 rounded border border-outline-variant bg-surface-container-low font-body-sm text-body-sm text-on-surface-variant">
                     <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">dns</span>
-                    <span>No local blockchain node reachable right now - decisions below are stored in the database only. &quot;Connect to Blockchain&quot; will fail until a Hardhat node is running (see Support for setup steps); nothing here is lost, it just isn&apos;t on-chain yet.</span>
+                    <span>No blockchain RPC endpoint reachable right now - decisions below are stored in the database only. &quot;Connect to Blockchain&quot; will fail until the backend&apos;s WEB3_PROVIDER_URL/CONTRACT_ADDRESS/DEPLOYER_PRIVATE_KEY are configured and reachable (local Hardhat node for dev, or Sepolia for a hosted deployment - see Support for setup steps); nothing here is lost, it just isn&apos;t on-chain yet.</span>
                 </div>
             )}
 

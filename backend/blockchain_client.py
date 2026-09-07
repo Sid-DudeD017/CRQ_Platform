@@ -42,6 +42,18 @@ from web3 import Web3
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_PATH = REPO_ROOT / "blockchain" / "artifacts" / "contracts" / "AuditLedger.sol" / "AuditLedger.json"
+# [Deployed backend could never reach the chain - fix] ARTIFACT_PATH above
+# only exists after someone runs `npx hardhat compile` locally -
+# blockchain/artifacts/ is gitignored (it's build output, like any other
+# compiled artifact) and Render's build for this service is just
+# `pip install -r requirements.txt`; it never touches the blockchain/
+# Node project at all. That meant _get_contract() below returned None on
+# every single request on the hosted backend, no matter how correctly
+# WEB3_PROVIDER_URL/CONTRACT_ADDRESS/DEPLOYER_PRIVATE_KEY were configured
+# on Render - "Connect to Blockchain" was never going to work there. The
+# actual contract ABI barely changes and is tiny, so it's checked into
+# git here and used whenever the Hardhat build output isn't present.
+COMMITTED_ABI_PATH = Path(__file__).resolve().parent / "contract_abi.json"
 
 # main.py does `from . import blockchain_client, ...` BEFORE
 # `from .database import ...` - database.py is what calls load_dotenv() for
@@ -88,7 +100,12 @@ def _get_contract():
     if _contract is not None:
         return _contract
 
-    if not ARTIFACT_PATH.exists():
+    # Prefer a freshly-compiled local Hardhat artifact (covers active
+    # contract development), but fall back to the ABI checked into git -
+    # this is the only path that exists at all on a hosted backend like
+    # Render, which never runs `npx hardhat compile`.
+    abi_path = ARTIFACT_PATH if ARTIFACT_PATH.exists() else COMMITTED_ABI_PATH
+    if not abi_path.exists():
         return None
 
     try:
@@ -96,13 +113,13 @@ def _get_contract():
         if not w3.is_connected():
             return None
 
-        with open(ARTIFACT_PATH) as f:
+        with open(abi_path) as f:
             artifact = json.load(f)
 
         account = w3.eth.account.from_key(DEPLOYER_PRIVATE_KEY)
         contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=artifact["abi"])
     except Exception as e:
-        print(f"[blockchain_client] Could not connect to local chain: {e}")
+        print(f"[blockchain_client] Could not connect to chain: {e}")
         return None
 
     _w3, _account, _contract = w3, account, contract
