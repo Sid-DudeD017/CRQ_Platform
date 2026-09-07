@@ -1559,7 +1559,7 @@ def training_toggle_complete(
         db.delete(existing)
         db.commit()
         audit_events_logger.info(
-            "training_module_uncompleted", extra={"module": request.module, "user": current_user},
+            "training_module_uncompleted", extra={"training_module": request.module, "user": current_user},
         )
         return {"status": "success", "module": request.module, "completed": False}
 
@@ -1568,7 +1568,7 @@ def training_toggle_complete(
     db.commit()
     db.refresh(record)
     audit_events_logger.info(
-        "training_module_completed", extra={"module": request.module, "user": current_user},
+        "training_module_completed", extra={"training_module": request.module, "user": current_user},
     )
     return {"status": "success", "module": request.module, "completed": True}
 
