@@ -53,12 +53,12 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL", "http://127.0.0.1:8545")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3")
-DEPLOYER_PRIVATE_KEY = os.getenv(
-    "DEPLOYER_PRIVATE_KEY",
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-)
-_HARDHAT_DEFAULT_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+# Hardhat's well-known, publicly-documented default test private key - the
+# same for every Hardhat install everywhere, not a real secret. Only a
+# valid default for the LOCAL network (see the module docstring).
+_HARDHAT_DEFAULT_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"  # gitleaks:allow
 _HARDHAT_DEFAULT_URLS = ("http://127.0.0.1:8545", "http://localhost:8545")
+DEPLOYER_PRIVATE_KEY = os.getenv("DEPLOYER_PRIVATE_KEY", _HARDHAT_DEFAULT_KEY)
 
 if DEPLOYER_PRIVATE_KEY == _HARDHAT_DEFAULT_KEY and WEB3_PROVIDER_URL not in _HARDHAT_DEFAULT_URLS:
     # Someone pointed WEB3_PROVIDER_URL at a real network (Sepolia, most
