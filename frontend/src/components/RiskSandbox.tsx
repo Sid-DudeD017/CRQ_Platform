@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from 'react';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import CountUp from './CountUp';
 
@@ -81,6 +82,15 @@ export default function RiskSandbox({
     runVersion,
     sandboxMode = 'interactive',
 }: RiskSandboxProps) {
+    // [Cross-user data leakage fix] GET /api/assets and POST
+    // /api/attack-path now require a logged-in caller whenever
+    // dataSourceForPath is 'own' (see backend/main.py) - previously
+    // neither endpoint checked auth at all for "own" traversal, which
+    // could read across accounts' ingested topology. This panel is only
+    // ever rendered behind SharedLayout's auth gate, so token is expected
+    // to be set already.
+    const { token } = useAuth();
+
     // [Deploy-level polish] Replay the "pop up nicely" entrance animation
     // on every completed run without unmounting anything. A React `key`
     // remount used to do this but also tore down and rebuilt the Loss
@@ -94,6 +104,27 @@ export default function RiskSandbox({
     // info button next to "Annualized Loss Expectancy" below did nothing
     // at all.
     const [showAleWhy, setShowAleWhy] = useState(false);
+
+    // [Low-confidence results look too authoritative - fix] A cold-start
+    // run (0 incidents logged yet) sits at 100/100 model uncertainty by
+    // design (see risk_engine.compute_calibration) - that's honest, not a
+    // bug, but the UI previously gave zero visual or interaction
+    // difference between that and a well-calibrated run: same green
+    // "Approve & Log" button, same styling on "Accept Risk", no warning
+    // anywhere near the board-approval action itself. uncertaintyScore
+    // and isLowConfidence below drive a visible warning banner and a
+    // required acknowledgment before either action is clickable while
+    // confidence is this low - see the checkbox and disabled= wiring
+    // further down.
+    const uncertaintyScore = simResults?.calibration?.uncertainty_score;
+    const incidentCount = simResults?.calibration?.incident_count ?? 0;
+    const isLowConfidence = typeof uncertaintyScore === 'number' && uncertaintyScore >= 85;
+    const [lowConfidenceAck, setLowConfidenceAck] = useState(false);
+    useEffect(() => {
+        // A fresh run means fresh numbers - never let an acknowledgment
+        // from a PREVIOUS run silently authorize approving this one.
+        setLowConfidenceAck(false);
+    }, [runVersion]);
 
     // [Attack Path] real BFS over the actual NetworkEdge topology (see
     // POST /api/attack-path) from every internet-facing asset to a
@@ -112,7 +143,9 @@ export default function RiskSandbox({
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetchWithRetry(`${API_BASE}/api/assets?data_source=${dataSourceForPath}`);
+                const res = await fetchWithRetry(`${API_BASE}/api/assets?data_source=${dataSourceForPath}`, {
+                    headers: dataSourceForPath === 'own' && token ? { 'Authorization': `Bearer ${token}` } : undefined,
+                });
                 if (!res.ok || cancelled) return;
                 const data = await res.json();
                 const list = data.data || [];
@@ -122,7 +155,7 @@ export default function RiskSandbox({
             } catch (e) { /* silent - panel just stays empty */ }
         })();
         return () => { cancelled = true; };
-    }, [dataSourceForPath]);
+    }, [dataSourceForPath, token]);
 
     useEffect(() => {
         if (!selectedTargetId) { setAttackPath(null); return; }
@@ -132,7 +165,10 @@ export default function RiskSandbox({
             try {
                 const res = await fetchWithRetry(`${API_BASE}/api/attack-path`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(dataSourceForPath === 'own' && token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    },
                     body: JSON.stringify({
                         target_asset_id: selectedTargetId,
                         active_controls: controls,
@@ -147,7 +183,7 @@ export default function RiskSandbox({
         })();
         return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedTargetId, JSON.stringify(controls), dataSourceForPath]);
+    }, [selectedTargetId, JSON.stringify(controls), dataSourceForPath, token]);
 
     const heroSectionRef = useRef<HTMLDivElement>(null);
     const attributionSectionRef = useRef<HTMLDivElement>(null);
@@ -199,11 +235,12 @@ export default function RiskSandbox({
                 title="Toggle every Strategic Control to match the recommended mix above - your current toggles are left alone until you click this"
                 className="px-3 py-1 border border-outline-variant text-on-surface-variant rounded font-label-caps text-label-caps font-semibold hover:bg-surface-container-low transition-colors active:scale-95 flex items-center gap-1"
               >
-                <span className="material-symbols-outlined text-[14px]">auto_awesome</span>Use Recommended Mix
+                <span aria-hidden="true" className="material-symbols-outlined text-[14px]">auto_awesome</span>Use Recommended Mix
               </button>
               <button
                 onClick={approveOptimizer}
-                disabled={isApproving}
+                disabled={isApproving || (isLowConfidence && !lowConfidenceAck)}
+                title={isLowConfidence && !lowConfidenceAck ? 'Acknowledge the low-confidence warning above before approving' : undefined}
                 className="px-3 py-1 bg-[#15803d] text-white rounded font-label-caps text-label-caps font-semibold hover:bg-opacity-90 disabled:opacity-50 transition-colors active:scale-95"
               >
                 {isApproving ? 'Logging...' : 'Approve & Log'}
@@ -219,7 +256,7 @@ export default function RiskSandbox({
         <span className="font-body-sm text-body-sm font-medium">{c.name}</span>
         {optimizerPicks && optimizerPicks.includes(c.name) && (
             <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
-                <span className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
+                <span aria-hidden="true" className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
             </span>
         )}
         </div>
@@ -234,7 +271,7 @@ export default function RiskSandbox({
         </div>
         </div>
         <button onClick={() => runSimulation()} disabled={isSimulating} className="w-full landing-cta-gradient font-body-sm text-body-sm py-3 rounded font-bold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-            {isSimulating && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
+            {isSimulating && <span aria-hidden="true" className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
             {isSimulating ? 'Running Simulation...' : 'Run Simulation'}
         </button>
         </>
@@ -254,10 +291,11 @@ export default function RiskSandbox({
     onClick={() => setShowAleWhy((v) => !v)}
     disabled={!simResults?.scenario_breakdown}
     aria-expanded={showAleWhy}
+    aria-label="Why? See the real attack-scenario breakdown behind this number"
     title="Why? See the real attack-scenario breakdown behind this number"
     className="text-on-surface-variant hover:text-primary disabled:opacity-40 disabled:hover:text-on-surface-variant"
 >
-    <span className="material-symbols-outlined text-[20px]">info</span>
+    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">info</span>
 </button>
 </div>
 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Projected financial impact based on current control posture.</p>
@@ -296,6 +334,27 @@ export default function RiskSandbox({
                 Uncertainty {simResults.calibration.uncertainty_score.toFixed(0)}/100
             </span>
         )}
+    </div>
+)}
+{isLowConfidence && (
+    <div className="mt-2 flex flex-col gap-2 px-3 py-2.5 rounded border border-error/40 bg-error/10">
+        <div className="flex items-start gap-2 text-error font-body-sm text-body-sm font-semibold">
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] mt-0.5">warning</span>
+            <span>
+                Low-confidence result - {uncertaintyScore.toFixed(0)}/100 model uncertainty
+                {incidentCount === 0 ? ' with no logged incidents yet' : ` from only ${incidentCount} logged incident${incidentCount !== 1 ? 's' : ''}`}.
+                This is a cold-start estimate, not a validated one - review it carefully before treating it as board-ready.
+            </span>
+        </div>
+        <label className="flex items-start gap-2 font-body-sm text-body-sm text-on-surface pl-6 cursor-pointer">
+            <input
+                type="checkbox"
+                checked={lowConfidenceAck}
+                onChange={(e) => setLowConfidenceAck(e.target.checked)}
+                className="mt-0.5"
+            />
+            I understand this result carries low confidence and want to approve or accept it anyway.
+        </label>
     </div>
 )}
 {showAleWhy && simResults?.scenario_breakdown?.scenarios?.length > 0 && (() => {
@@ -368,7 +427,7 @@ export default function RiskSandbox({
         const positive = roiPct >= 0;
         return (
             <div className={`font-headline-md text-headline-md font-data-mono flex items-center ${positive ? 'text-[#15803d]' : 'text-error'}`}>
-                <span className="material-symbols-outlined mr-1">{positive ? 'arrow_upward' : 'arrow_downward'}</span>
+                <span aria-hidden="true" className="material-symbols-outlined mr-1">{positive ? 'arrow_upward' : 'arrow_downward'}</span>
                 <CountUp value={Math.abs(roiPct)} formatter={(v) => `${v.toFixed(0)}%`} />
             </div>
         );
@@ -406,7 +465,7 @@ export default function RiskSandbox({
     </ResponsiveContainer>
 ) : isSimulating ? (
     <div className="w-full h-32 flex flex-col items-center justify-center gap-2 text-on-surface-variant font-body-sm">
-        <span className="material-symbols-outlined text-[24px] animate-spin">progress_activity</span>
+        <span aria-hidden="true" className="material-symbols-outlined text-[24px] animate-spin">progress_activity</span>
         Calculating loss distribution...
     </div>
 ) : (
@@ -515,7 +574,7 @@ export default function RiskSandbox({
         <details className="group">
             <summary className="cursor-pointer list-none flex items-center justify-between gap-2 select-none">
                 <div className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
                     <div>
                         <span className="font-title-lg text-title-lg text-primary">Where these numbers come from</span>
                         <p className="font-body-sm text-body-sm text-on-surface-variant">The exact FAIR ranges and live data behind this run&apos;s ALE and VaR - not just the headline figure.</p>
@@ -572,7 +631,7 @@ export default function RiskSandbox({
 <details className="group">
     <summary className="cursor-pointer list-none flex items-center justify-between gap-2 select-none flex-wrap">
         <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
             <div>
                 <span className="font-title-lg text-title-lg text-primary">Attack Path</span>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">Real shortest path from an internet-facing asset to a target, over the actual network topology.</p>
@@ -605,7 +664,7 @@ export default function RiskSandbox({
                         <span className="px-2 py-1 bg-surface-container rounded border border-outline-variant">Internet</span>
                         {attackPath.path.map((node: any) => (
                             <React.Fragment key={node.id}>
-                                <span className="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
                                 <span className="px-2 py-1 bg-surface-container rounded border border-outline-variant" title={node.business_unit}>{node.name}</span>
                             </React.Fragment>
                         ))}
@@ -618,7 +677,7 @@ export default function RiskSandbox({
                 </>
             ) : (
                 <p className="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px] text-[#15803d]">shield</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-[#15803d]">shield</span>
                     {attackPath.blocked_by_waf
                         ? 'No path found - Public Exposure Hardening (WAF) removes every internet-facing asset as an entry point.'
                         : 'No path found from any internet-facing asset to this target over the current network topology.'}
@@ -650,7 +709,7 @@ export default function RiskSandbox({
 {sandboxMode === 'whatIf' ? (
     <details className="group">
         <summary className="cursor-pointer list-none flex items-center gap-1.5 font-body-sm text-body-sm font-semibold text-primary mb-stack-md select-none w-fit">
-            <span className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
+            <span aria-hidden="true" className="material-symbols-outlined text-[18px] transition-transform duration-150 group-open:rotate-90">chevron_right</span>
             Model an additional what-if budget
         </summary>
         <div className="space-y-stack-lg">
@@ -682,7 +741,8 @@ export default function RiskSandbox({
                 </span>
                 <button
                     onClick={() => acceptRisk(unit.business_unit, riskRupees)}
-                    disabled={acceptingRiskFor === unit.business_unit}
+                    disabled={acceptingRiskFor === unit.business_unit || (isLowConfidence && !lowConfidenceAck)}
+                    title={isLowConfidence && !lowConfidenceAck ? 'Acknowledge the low-confidence warning above before accepting this risk' : undefined}
                     className="ml-2 px-2 py-0.5 border border-outline-variant text-on-surface-variant hover:border-error hover:text-error rounded text-label-caps font-label-caps transition-colors active:scale-95 disabled:opacity-60"
                 >
                     {acceptingRiskFor === unit.business_unit ? 'Logging...' : 'Accept Risk'}
@@ -713,7 +773,7 @@ export default function RiskSandbox({
 )}
 </div>
 <a href="/ledger" className="mt-stack-lg text-primary font-body-sm text-body-sm font-semibold flex items-center gap-1 hover:underline w-fit">
-                        View Detailed Ledger <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                        View Detailed Ledger <span aria-hidden="true" className="material-symbols-outlined text-[16px]">arrow_forward</span>
 </a>
 </div>
 </div>

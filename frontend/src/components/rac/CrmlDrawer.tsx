@@ -100,7 +100,7 @@ simulation_outputs:
                 {/* Header */}
                 <div className="p-4 bg-[#1e293b] border-b border-slate-700 flex justify-between items-center">
                     <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[#38bdf8] text-[20px]">terminal</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[#38bdf8] text-[20px]">terminal</span>
                         <div>
                             <h3 className="font-title-md font-bold text-white text-sm">Declarative Risk Specification</h3>
                             <p className="text-[11px] text-slate-400">Declarative YAML risk model underpinning active simulation</p>
@@ -111,18 +111,18 @@ simulation_outputs:
                             onClick={handleCopy}
                             className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-semibold flex items-center gap-1 border border-slate-600 transition-colors"
                         >
-                            <span className="material-symbols-outlined text-[14px]">content_copy</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">content_copy</span>
                             {copied ? 'Copied' : 'Copy'}
                         </button>
                         <button
                             onClick={handleDownload}
                             className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-semibold flex items-center gap-1 border border-slate-600 transition-colors"
                         >
-                            <span className="material-symbols-outlined text-[14px]">download</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">download</span>
                             Export
                         </button>
-                        <button onClick={onClose} className="text-slate-400 hover:text-white p-1">
-                            <span className="material-symbols-outlined text-[20px]">close</span>
+                        <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white p-1">
+                            <span aria-hidden="true" className="material-symbols-outlined text-[20px]">close</span>
                         </button>
                     </div>
                 </div>

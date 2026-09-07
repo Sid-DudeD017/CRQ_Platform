@@ -1,23 +1,36 @@
 """
-Real (local) blockchain client for the AuditLedger smart contract.
+Blockchain client for the AuditLedger smart contract.
 
-Talks to a local Hardhat node - see blockchain/README or plan.md for how
-to start one:
-    cd blockchain && npm install && npx hardhat node          (tab 1)
-    cd blockchain && npx hardhat run scripts/deploy.js --network localhost   (tab 2, once)
+Talks to whatever EVM JSON-RPC endpoint WEB3_PROVIDER_URL points at - a
+local Hardhat node for development, or a real testnet (Sepolia) for a
+hosted deployment that can't run its own node:
 
-Falls back to returning None (mock/no-op) if the node isn't reachable or
-the contract hasn't been compiled/deployed yet, so the rest of the app
-doesn't break for anyone who isn't running Hardhat locally (e.g. a
+    Local (Hardhat), see blockchain/README or plan.md:
+        cd blockchain && npm install && npx hardhat node                          (tab 1)
+        cd blockchain && npx hardhat run scripts/deploy.js --network localhost    (tab 2, once)
+
+    Hosted (Sepolia) - see the README's Deployment section:
+        cd blockchain && npx hardhat run scripts/deploy.js --network sepolia
+
+    Either way, `deploy.js` writes WEB3_PROVIDER_URL / CONTRACT_ADDRESS /
+    DEPLOYER_PRIVATE_KEY into backend/.env for you - for a hosted backend,
+    copy those same three values into its Render env vars (see
+    render.yaml) instead of leaving them at the local defaults below.
+
+Falls back to returning None (mock/no-op) if the endpoint isn't reachable
+or the contract hasn't been compiled/deployed yet, so the rest of the app
+doesn't break for anyone who isn't running a chain at all (e.g. a
 teammate just testing /api/simulate-risk on its own).
 
-Uses Hardhat's account #0 as the transaction sender to match
-AuditLedger.sol's `onlyServer` modifier, which is set to whichever account
-deployed the contract (scripts/deploy.js deploys from the default account,
-which is Hardhat's account #0). The private key below is Hardhat's
-well-known, publicly-documented default test key - the same for every
-Hardhat install everywhere - not a real secret. Never reuse this key or
-this approach outside a local Hardhat node.
+The transaction sender must match AuditLedger.sol's `onlyServer` modifier,
+which is set to whichever account deployed the contract - so
+DEPLOYER_PRIVATE_KEY must be that same deployer's key, whether that's
+Hardhat's account #0 (local) or your own Sepolia wallet (hosted). The
+private key below is Hardhat's well-known, publicly-documented default
+test key - the same for every Hardhat install everywhere - not a real
+secret, and only a valid default for the LOCAL network. Never reuse this
+key, or any other real key, outside a local Hardhat node - see
+blockchain/.env.example for how to provision a Sepolia-only wallet.
 """
 import json
 import os
@@ -44,6 +57,24 @@ DEPLOYER_PRIVATE_KEY = os.getenv(
     "DEPLOYER_PRIVATE_KEY",
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 )
+_HARDHAT_DEFAULT_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_HARDHAT_DEFAULT_URLS = ("http://127.0.0.1:8545", "http://localhost:8545")
+
+if DEPLOYER_PRIVATE_KEY == _HARDHAT_DEFAULT_KEY and WEB3_PROVIDER_URL not in _HARDHAT_DEFAULT_URLS:
+    # Someone pointed WEB3_PROVIDER_URL at a real network (Sepolia, most
+    # likely) but left DEPLOYER_PRIVATE_KEY at Hardhat's public default -
+    # every write will fail "Unauthorized" (this key almost certainly
+    # didn't deploy that contract) rather than the confusing "can't
+    # connect" this module otherwise degrades to silently. Surface it
+    # once, at import time, instead of only after the first failed tx.
+    print(
+        "[blockchain_client] WARNING: WEB3_PROVIDER_URL is set to a non-local "
+        "endpoint but DEPLOYER_PRIVATE_KEY is still Hardhat's well-known "
+        "default test key. Set DEPLOYER_PRIVATE_KEY to the wallet that "
+        "actually deployed AuditLedger.sol on that network (see "
+        "blockchain/scripts/deploy.js's output), or every on-chain write "
+        "will revert with 'Unauthorized'."
+    )
 
 _contract = None
 _w3: Optional[Web3] = None
@@ -76,6 +107,17 @@ def _get_contract():
 
     _w3, _account, _contract = w3, account, contract
     return _contract
+
+
+def is_available() -> bool:
+    """
+    [Degraded-mode / service-health feedback fix] Real, live reachability
+    check - attempts the same lazy connection log_risk_acceptance relies
+    on (_get_contract) and reports whether it actually succeeded, instead
+    of every page finding out only when a specific action (commit-chain)
+    fails. Backs GET /api/status below.
+    """
+    return _get_contract() is not None
 
 
 def log_risk_acceptance(action: str, data_hash: str, user: str, board_approved: bool = False) -> Optional[str]:

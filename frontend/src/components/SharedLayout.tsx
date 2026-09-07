@@ -5,7 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { API_BASE } from '@/lib/api';
+import { useServiceStatus } from '@/lib/useServiceStatus';
 import VirtualCisoChat from './VirtualCisoChat';
+import WorkspaceStatusPopover from './WorkspaceStatusPopover';
 import CommandPalette from './CommandPalette';
 import AuthScreen from './AuthScreen';
 import LandingPage from './LandingPage';
@@ -13,8 +15,31 @@ import LandingPage from './LandingPage';
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
-    const { token, username, loginAs, logout, loginError, loggingInRole } = useAuth();
+    const { token, isAuthReady, username, name, loginAs, logout, loginError, loggingInRole } = useAuth();
+    // [No degraded-mode / service-health feedback - fix] Polled once here,
+    // in the root layout every protected page shares, so a backend/
+    // database/blockchain problem is visible everywhere instead of only
+    // surfacing as a one-off toast on whatever action a visitor happens
+    // to try next.
+    const { data: serviceStatus, unreachable: backendUnreachable, refresh: refreshServiceStatus } = useServiceStatus();
     const { theme, toggleTheme } = useTheme();
+    // Prefer a real display name; demo accounts (ciso/cfo) and anyone who
+    // signed up without a name have none, so fall back to the email's
+    // local-part rather than the whole address - showing the full email in
+    // "Welcome back, ..." was overflowing/getting clipped on the Home tab.
+    const displayName = name || (username && username.includes('@') ? username.split('@')[0] : username);
+
+    // Scroll-to-top: shown once the page is scrolled down a bit, on every
+    // dashboard page (this component wraps all of them via {children}
+    // below), so there's always a quick way back up no matter how far the
+    // user has scrolled.
+    const [showScrollTop, setShowScrollTop] = useState(false);
+    useEffect(() => {
+        const onScroll = () => setShowScrollTop(window.scrollY > 400);
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
+        return () => window.removeEventListener('scroll', onScroll);
+    }, []);
 
     const [authView, setAuthView] = useState<'landing' | 'login' | 'signup'>('landing');
     // [Clear flow of work] Right after login, before any dashboard route
@@ -47,6 +72,25 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         }
         setDataSourceHydrated(true);
     }, [token, dataSourceKey]);
+
+    useEffect(() => {
+        if (!token || dataSource === null) return;
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const next = params.get('next');
+            // Only ever an internal, same-origin path (middleware.ts is the
+            // only thing that ever sets it) - the leading-slash/no-//
+            // check is still enforced here as defense in depth against an
+            // open redirect if that ever changes.
+            if (next && next.startsWith('/') && !next.startsWith('//')) {
+                router.replace(next);
+            }
+        } catch (e) {
+            // ignore - worst case the visitor stays on the start screen
+            // and picks a dashboard tab manually.
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, dataSource]);
 
     // Which tab of the start screen is showing - "Home" is a personalized
     // recreation of the pre-login LandingPage (same hero/stats/about
@@ -190,6 +234,29 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     // Both would misrepresent Training as part of a dashboard it isn't.
     const isTrainingRoute = pathname === '/training';
 
+    // [Weak mode identity - fix] Previously the only visible signal for
+    // "which dataset am I actually looking at" was a two-letter avatar
+    // initial ("CI" for the ciso account) - nothing told a visitor whether
+    // Overview/Ledger/Reports/etc were showing the shared demo fleet,
+    // their own ingested data, or (on /training) no live risk data at
+    // all. This computes one persistent label from state this component
+    // already tracks (dataSource, isTrainingRoute) and renders it in the
+    // nav bar below on every protected page, so the active workspace is
+    // never ambiguous on a risk-bearing screen.
+    const workspaceLabel = isTrainingRoute
+        ? 'Training Workspace'
+        : dataSource === 'own'
+        ? 'Own Data Workspace'
+        : dataSource === 'predefined'
+        ? 'Demo Workspace'
+        : null; // null on the "how do you want to start" chooser - no workspace chosen yet
+    const workspaceIcon = isTrainingRoute ? 'school' : dataSource === 'own' ? 'dns' : 'science';
+    const workspaceDescription = isTrainingRoute
+        ? 'Training modules - no live risk data or simulations here.'
+        : dataSource === 'own'
+        ? 'Showing YOUR own ingested assets, telemetry, and decisions - never another account\'s.'
+        : 'Showing the shared demo fleet - synthetic data, not a real production environment.';
+
     useEffect(() => {
         setIsMobileNavOpen(false);
     }, [pathname]);
@@ -199,6 +266,9 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     // very first thing a visitor sees on every route; only its Login/Sign Up
     // buttons switch to the real auth form (AuthScreen), which can hand
     // control back with onBack.
+    if (!isAuthReady) {
+        return null;
+    }
     if (!token) {
         if (authView === 'landing') {
             return <LandingPage onLogin={() => setAuthView('login')} onSignup={() => setAuthView('signup')} />;
@@ -228,13 +298,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         // as a continuation of the marketing site instead of a different
         // product - only the CTA differs (Go to Dashboard vs. Sign Up).
         const capabilities = [
-            { icon: 'monitoring', title: 'FAIR Monte Carlo Engine', desc: '20,000-iteration simulation turns exposure into ₹ ALE and VaR.' },
+            { icon: 'monitoring', title: 'FAIR Monte Carlo Engine', desc: '10,000-iteration simulation turns exposure into ₹ ALE and VaR.' },
             { icon: 'auto_awesome', title: 'Virtual CISO, on call', desc: 'LangGraph AI agent answers security & compliance questions instantly.' },
             { icon: 'link', title: 'Blockchain Audit Trail', desc: 'Every risk decision is hashed and committed on-chain - tamper-evident.' },
             { icon: 'tune', title: 'Budget Optimizer', desc: '0/1 knapsack picks the exact controls that cut the most risk per rupee.' },
         ];
         const stats = [
-            { value: '20K+', label: 'Simulated years per run' },
+            { value: '10K+', label: 'Simulated years per run' },
             { value: '99.9%', label: 'Audit trail integrity' },
             { value: '24/7', label: 'AI compliance assistant' },
         ];
@@ -272,7 +342,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         </button>
                     </div>
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
-                        <span className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
                         <span className="text-on-surface whitespace-nowrap">Logged in</span>
                         <button onClick={logout} className="text-on-surface-variant hover:text-error underline ml-1">Logout</button>
                     </div>
@@ -284,7 +354,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         <section className="relative z-10 max-w-[1200px] mx-auto px-6 sm:px-10 pt-10 sm:pt-16 pb-16 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
                             <div>
                                 <h1 className="text-display-lg landing-font landing-heading-gradient tracking-tight mb-stack-md">
-                                    Welcome back{username ? `, ${username}` : ''}
+                                    Welcome back{displayName ? `, ${displayName}` : ''}
                                 </h1>
                                 <p className="font-body-md text-body-md text-on-surface-variant mb-stack-lg max-w-md">
                                     An AI-powered platform that turns telemetry into Annualized Loss Expectancy, optimizes your security budget, and anchors every decision to a blockchain audit trail.
@@ -295,7 +365,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                         className="px-6 py-3 rounded-full landing-cta-gradient font-body-sm text-body-sm font-bold hover:opacity-90 active:scale-95 transition-all shadow-md flex items-center gap-2"
                                     >
                                         Go to Dashboard
-                                        <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">arrow_forward</span>
                                     </button>
                                 </div>
                             </div>
@@ -305,7 +375,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     {capabilities.map((c) => (
                                         <div key={c.title} className="flex items-start gap-3">
                                             <div className="w-10 h-10 rounded-lg landing-icon-badge flex items-center justify-center shrink-0">
-                                                <span className="material-symbols-outlined text-[20px]">{c.icon}</span>
+                                                <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{c.icon}</span>
                                             </div>
                                             <div>
                                                 <h3 className="font-body-sm text-body-sm font-bold text-on-surface">{c.title}</h3>
@@ -342,7 +412,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 {about.map((a) => (
                                     <div key={a.title} className="border border-outline-variant rounded-xl p-stack-md elevate bg-surface-container-lowest">
                                         <div className="w-10 h-10 rounded-full landing-icon-badge flex items-center justify-center mb-stack-sm">
-                                            <span className="material-symbols-outlined text-[20px]">{a.icon}</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{a.icon}</span>
                                         </div>
                                         <h3 className="font-body-sm text-body-sm font-bold text-on-surface mb-1">{a.title}</h3>
                                         <p className="font-body-sm text-body-sm text-on-surface-variant">{a.desc}</p>
@@ -363,13 +433,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     onClick={() => router.push(dataSource === 'own' ? '/ingestion' : '/overview')}
                                     className="mb-stack-lg text-primary font-label-caps text-label-caps hover:underline flex items-center gap-1"
                                 >
-                                    <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[16px]">arrow_back</span>
                                     Back to dashboard
                                 </button>
                             )}
                             <div className="text-center mb-stack-lg">
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full landing-icon-badge font-label-caps text-label-caps font-semibold mb-stack-sm">
-                                    <span className="material-symbols-outlined text-[14px]">rocket_launch</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">rocket_launch</span>
                                     Getting Started
                                 </span>
                                 <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-1">How do you want to start?</h1>
@@ -382,13 +452,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 >
                                     <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-surface-container-low border border-outline-variant font-label-caps text-label-caps text-on-surface-variant">Fastest</span>
                                     <span className="w-10 h-10 rounded landing-cta-gradient flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-[20px]">bolt</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[20px]">bolt</span>
                                     </span>
                                     <span className="font-body-md text-body-md font-semibold text-on-surface">Run a demo analysis</span>
                                     <span className="font-body-sm text-body-sm text-on-surface-variant flex-1">Jump straight in with realistic demo telemetry and a live simulation, ready in seconds.</span>
                                     <span className="font-label-caps text-label-caps text-primary flex items-center gap-1 mt-1 opacity-80 group-hover:opacity-100">
                                         Get started
-                                        <span className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
                                     </span>
                                 </button>
                                 <button
@@ -397,13 +467,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 >
                                     <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-surface-container-low border border-outline-variant font-label-caps text-label-caps text-on-surface-variant">Real Data</span>
                                     <span className="w-10 h-10 rounded bg-secondary-container text-on-secondary-container flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-[20px]">cloud_upload</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[20px]">cloud_upload</span>
                                     </span>
                                     <span className="font-body-md text-body-md font-semibold text-on-surface">Enter your own data</span>
                                     <span className="font-body-sm text-body-sm text-on-surface-variant flex-1">Upload your own device configs and simulate risk from your real environment - no demo numbers, ever.</span>
                                     <span className="font-label-caps text-label-caps text-primary flex items-center gap-1 mt-1 opacity-80 group-hover:opacity-100">
                                         Get started
-                                        <span className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
                                     </span>
                                 </button>
                                 <button
@@ -412,13 +482,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 >
                                     <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-surface-container-low border border-outline-variant font-label-caps text-label-caps text-on-surface-variant">Compliance</span>
                                     <span className="w-10 h-10 rounded bg-secondary-container text-on-secondary-container flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-[20px]">model_training</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[20px]">model_training</span>
                                     </span>
                                     <span className="font-body-md text-body-md font-semibold text-on-surface">Train &amp; calibrate the model</span>
                                     <span className="font-body-sm text-body-sm text-on-surface-variant flex-1">Work through the security-awareness modules that feed the model&apos;s Control Strength score - separate from picking demo or your own data.</span>
                                     <span className="font-label-caps text-label-caps text-primary flex items-center gap-1 mt-1 opacity-80 group-hover:opacity-100">
                                         Get started
-                                        <span className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
                                     </span>
                                 </button>
                             </div>
@@ -435,7 +505,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 ].map((f) => (
                                     <div key={f.title} className="flex items-start gap-3">
                                         <span className="w-9 h-9 rounded-full landing-icon-badge flex items-center justify-center shrink-0">
-                                            <span className="material-symbols-outlined text-[18px]">{f.icon}</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{f.icon}</span>
                                         </span>
                                         <div>
                                             <h3 className="font-body-sm text-body-sm font-bold text-on-surface">{f.title}</h3>
@@ -454,22 +524,57 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     return (
         <div className="bg-background text-on-background font-body-md min-h-screen flex flex-col">
             <CommandPalette />
+            {/* [No degraded-mode / service-health feedback - fix] Shown on
+                every protected page (this layout wraps all of them) whenever
+                the backend can't be reached at all, or answered but reported
+                its own database as unavailable - the two cases where reads/
+                writes across the whole app are actually likely to fail, not
+                just one feature. AI-fallback and blockchain-unavailable are
+                surfaced closer to where they actually matter (the chat panel,
+                the Ledger page) rather than here, since the app still works
+                fine without either. */}
+            {(backendUnreachable || serviceStatus?.database === 'error') && (
+                <div className="bg-error text-white px-4 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-body-sm text-body-sm text-center">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">cloud_off</span>
+                    <span>
+                        {backendUnreachable
+                            ? "Can't reach the backend right now - is it running on port 8000?"
+                            : 'The backend database is unavailable right now - actions that read or write data may fail.'}
+                    </span>
+                    <button
+                        onClick={() => refreshServiceStatus()}
+                        className="underline font-semibold hover:opacity-80 transition-opacity"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
             {/* TopNavBar */}
             <nav className="bg-surface border-b border-outline-variant docked full-width top-0 z-50 shadow-[0_2px_12px_-6px_rgba(0,0,0,0.12)]">
                 <div className="flex flex-wrap justify-between items-center gap-y-2 w-full px-4 sm:px-container-padding max-w-[1440px] mx-auto min-h-16 py-2">
                     <div className="flex items-center gap-stack-sm sm:gap-gutter">
                         <button
                             onClick={() => setIsMobileNavOpen((v) => !v)}
-                            className="md:hidden text-on-surface-variant hover:text-primary transition-colors"
+                            className="md:hidden -m-2 p-2 text-on-surface-variant hover:text-primary transition-colors"
                             aria-label={isMobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
                             aria-expanded={isMobileNavOpen}
                         >
-                            <span className="material-symbols-outlined">{isMobileNavOpen ? 'close' : 'menu'}</span>
+                            <span aria-hidden="true" className="material-symbols-outlined">{isMobileNavOpen ? 'close' : 'menu'}</span>
                         </button>
                         <Link href="/" onClick={goHome} className="flex items-center gap-2 hover:opacity-80 transition-opacity" title="Go to the home page">
                             <span className="w-7 h-7 rounded-md landing-cta-gradient shrink-0" aria-hidden="true" />
                             <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
                         </Link>
+                        {workspaceLabel && (
+                            <WorkspaceStatusPopover
+                                workspaceLabel={workspaceLabel}
+                                workspaceIcon={workspaceIcon}
+                                workspaceDescription={workspaceDescription}
+                                account={displayName || 'Guest'}
+                                serviceStatus={serviceStatus}
+                                backendUnreachable={backendUnreachable}
+                            />
+                        )}
                     </div>
                     <button
                         onClick={() => window.dispatchEvent(new Event('crq:open-command-palette'))}
@@ -477,7 +582,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         aria-label="Search"
                     >
                         <span className="font-body-sm text-body-sm">Search</span>
-                        <span className="material-symbols-outlined text-[18px]">search</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">search</span>
                     </button>
                     <div className="flex items-center flex-wrap justify-end gap-2 sm:gap-stack-md">
                         <button
@@ -485,11 +590,11 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             title="Go back to the demo / own data / training start screen"
                             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 border border-outline-variant text-on-surface-variant hover:text-primary hover:border-primary rounded font-label-caps text-label-caps transition-colors whitespace-nowrap"
                         >
-                            <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">swap_horiz</span>
                             Switch Dashboard
                         </button>
                         <Link href="/support" className="text-on-surface-variant hover:text-primary transition-colors" aria-label="Help">
-                            <span className="material-symbols-outlined">help</span>
+                            <span aria-hidden="true" className="material-symbols-outlined">help</span>
                         </Link>
                         <div className="relative">
                             <button
@@ -497,7 +602,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 className="text-on-surface-variant hover:text-primary transition-colors"
                                 aria-label="Settings"
                             >
-                                <span className="material-symbols-outlined">settings</span>
+                                <span aria-hidden="true" className="material-symbols-outlined">settings</span>
                             </button>
                             {isSettingsOpen && (
                                 <>
@@ -520,7 +625,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         </div>
                         {username ? (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
-                                <span className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
                                 <span className="text-on-surface whitespace-nowrap">Logged in</span>
                                 <button onClick={logout} className="text-on-surface-variant hover:text-error underline ml-1">Logout</button>
                             </div>
@@ -531,7 +636,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     disabled={loggingInRole !== null}
                                     className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1 whitespace-nowrap"
                                 >
-                                    {loggingInRole === 'ciso' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                                    {loggingInRole === 'ciso' && <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
                                     <span className="hidden sm:inline">Login as </span>CISO
                                 </button>
                                 <button
@@ -539,7 +644,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                     disabled={loggingInRole !== null}
                                     className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1 whitespace-nowrap"
                                 >
-                                    {loggingInRole === 'cfo' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                                    {loggingInRole === 'cfo' && <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
                                     <span className="hidden sm:inline">Login as </span>CFO
                                 </button>
                                 {loginError && <span className="text-error text-label-caps max-w-[160px] sm:max-w-none">{loginError}</span>}
@@ -559,6 +664,27 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
             {isMobileNavOpen && (
                 <div className="md:hidden bg-surface-container-low border-b border-outline-variant docked full-width z-40 shadow-lg animate-fade-scale-in">
                     <div className="p-gutter flex flex-col gap-unit max-w-[1440px] mx-auto w-full">
+                        {/* [Weak mode identity - fix] The desktop badge above is
+                            `hidden sm:inline-flex` - this is the mobile
+                            equivalent, shown at the top of the drawer instead of
+                            squeezed into the already-tight mobile top bar. */}
+                        {workspaceLabel && (
+                            <div className="mb-stack-sm flex flex-col gap-1 px-2.5 py-1.5 rounded border border-outline-variant bg-surface-container-lowest font-label-caps text-label-caps text-on-surface-variant">
+                                <div className="flex items-center gap-1.5">
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">{workspaceIcon}</span>
+                                    {workspaceLabel}
+                                    <span className="ml-auto font-body-sm text-body-sm normal-case opacity-80">{displayName || 'Guest'}</span>
+                                </div>
+                                {/* [Product improvement #6] Same backend/AI/blockchain/data-freshness
+                                    signals as the desktop popover, laid out flat here since the
+                                    mobile drawer has no room for a nested popover. */}
+                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 normal-case font-body-sm text-body-sm opacity-80">
+                                    <span>Backend: {backendUnreachable ? 'Unreachable' : 'Online'}</span>
+                                    <span>AI: {serviceStatus?.ai_agent === 'configured' ? 'Configured' : 'Fallback'}</span>
+                                    <span>Chain: {serviceStatus?.blockchain === 'connected' ? 'Connected' : 'Unavailable'}</span>
+                                </div>
+                            </div>
+                        )}
                         {!isTrainingRoute && (
                             <button
                                 onClick={() => { setIsNewAnalysisOpen(true); setIsMobileNavOpen(false); }}
@@ -571,7 +697,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             onClick={() => { returnToStart(); setIsMobileNavOpen(false); }}
                             className="w-full border border-outline-variant text-on-surface font-body-sm text-body-sm py-2 px-4 rounded font-semibold mb-stack-sm hover:border-primary transition-colors flex items-center justify-center gap-1.5"
                         >
-                            <span className="material-symbols-outlined text-[18px]">swap_horiz</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">swap_horiz</span>
                             Switch Dashboard
                         </button>
                         {!isTrainingRoute && navItems.map((item) => {
@@ -579,16 +705,16 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             return (
                                 <Link key={item.path} href={item.path} className={`relative flex items-center gap-stack-sm px-3 py-2 rounded-lg font-label-caps text-label-caps transition-all duration-150 active:scale-95 ${isActive ? 'landing-nav-active font-semibold' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
                                     {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full landing-nav-active-bar" />}
-                                    <span className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
                                 </Link>
                             );
                         })}
                         <div className="flex flex-col gap-unit pt-stack-sm mt-stack-sm border-t border-outline-variant">
                             <Link href="/support" className="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg">
-                                <span className="material-symbols-outlined text-[18px]">help_outline</span> Support
+                                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">help_outline</span> Support
                             </Link>
                             <Link href="/docs" className="flex items-center gap-stack-sm px-3 py-2 text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps rounded-lg">
-                                <span className="material-symbols-outlined text-[18px]">description</span> Documentation
+                                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">description</span> Documentation
                             </Link>
                         </div>
                     </div>
@@ -603,13 +729,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     <div className="flex items-center gap-unit overflow-x-auto">
                         {isTrainingRoute ? (
                             <span className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-label-caps text-label-caps landing-nav-active font-semibold whitespace-nowrap">
-                                <span className="material-symbols-outlined text-[18px]">model_training</span> Training
+                                <span aria-hidden="true" className="material-symbols-outlined text-[18px]">model_training</span> Training
                             </span>
                         ) : navItems.map((item) => {
                             const isActive = pathname === item.path;
                             return (
                                 <Link key={item.path} href={item.path} className={`relative flex items-center gap-1.5 px-3 py-2 rounded-lg font-label-caps text-label-caps whitespace-nowrap transition-all duration-150 active:scale-95 ${isActive ? 'landing-nav-active font-semibold' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
-                                    <span className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{item.icon}</span> {item.label}
                                     {isActive && <span className="absolute left-2 right-2 -bottom-px h-[3px] rounded-full landing-nav-active-bar" />}
                                 </Link>
                             );
@@ -617,10 +743,10 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     </div>
                     <div className="flex items-center gap-stack-md flex-shrink-0">
                         <Link href="/support" className="flex items-center gap-1.5 px-2 py-2 text-on-surface-variant hover:text-primary font-label-caps text-label-caps whitespace-nowrap">
-                            <span className="material-symbols-outlined text-[18px]">help_outline</span> Support
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">help_outline</span> Support
                         </Link>
                         <Link href="/docs" className="flex items-center gap-1.5 px-2 py-2 text-on-surface-variant hover:text-primary font-label-caps text-label-caps whitespace-nowrap">
-                            <span className="material-symbols-outlined text-[18px]">description</span> Docs
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">description</span> Docs
                         </Link>
                         {!isTrainingRoute && (
                             <button onClick={() => setIsNewAnalysisOpen(true)} className="landing-cta-gradient font-body-sm text-body-sm py-2 px-4 rounded font-semibold hover:opacity-90 transition-opacity whitespace-nowrap">
@@ -635,6 +761,16 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
             <main className="flex-1 max-w-[1440px] mx-auto w-full p-container-padding bg-background relative">
                 {children}
                 <VirtualCisoChat />
+                {showScrollTop && (
+                    <button
+                        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                        aria-label="Scroll to top"
+                        title="Scroll to top"
+                        className="fixed bottom-6 left-6 w-12 h-12 rounded-full bg-surface-container-lowest border border-outline-variant shadow-xl flex items-center justify-center z-50 hover:border-primary hover:text-primary transition-all active:scale-95"
+                    >
+                        <span aria-hidden="true" className="material-symbols-outlined text-[22px]">arrow_upward</span>
+                    </button>
+                )}
             </main>
             
             {isNewAnalysisOpen && (
@@ -645,8 +781,8 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     >
                         <div className="flex justify-between items-center mb-stack-md">
                             <h3 className="font-title-lg text-title-lg text-primary">New Analysis</h3>
-                            <button onClick={closeNewAnalysis} className="text-on-surface-variant hover:text-primary">
-                                <span className="material-symbols-outlined">close</span>
+                            <button onClick={closeNewAnalysis} aria-label="Close" className="text-on-surface-variant hover:text-primary">
+                                <span aria-hidden="true" className="material-symbols-outlined">close</span>
                             </button>
                         </div>
 
@@ -703,7 +839,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                             onClick={requestNewSimulation}
                                             className="font-label-caps text-label-caps text-primary hover:underline whitespace-nowrap flex items-center gap-1"
                                         >
-                                            <span className="material-symbols-outlined text-[14px]">refresh</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">refresh</span>
                                             Run New Simulation
                                         </button>
                                     </div>

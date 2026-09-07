@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
@@ -288,7 +287,7 @@ export default function ExecutiveDashboard() {
                 // auto-bootstrap swallows this instead - the manual Run
                 // Simulation button (and its own error toast) is still
                 // right there below.
-                if (!opts?.silent) showToast(`Simulation failed: ${data.detail || res.status}`, 'error');
+                if (!opts?.silent) showToast(`Simulation failed: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             setSimResults(data);
@@ -344,7 +343,7 @@ export default function ExecutiveDashboard() {
         } catch (e) {
             if (requestId !== simRequestIdRef.current) return;
             console.error(e);
-            if (!opts?.silent) showToast("Error running simulation. Ensure FastAPI is running on port 8000.", 'error');
+            if (!opts?.silent) showToast("Error running simulation. Ensure FastAPI is running on port 8000.", 'error', { dataSaved: 'no', retrySafe: true });
         } finally {
             if (requestId === simRequestIdRef.current) {
                 // [Deploy-level polish] A manual run that resolves in
@@ -431,7 +430,7 @@ export default function ExecutiveDashboard() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not log audit: ${data.detail || res.status}`, 'error');
+                showToast(`Could not log audit: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             setRiskLogged(true);
@@ -439,7 +438,7 @@ export default function ExecutiveDashboard() {
             showToast(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id} - Decided by: ${data.decided_by}`, 'success');
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setAcceptingRiskFor(null);
         }
@@ -484,7 +483,7 @@ export default function ExecutiveDashboard() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
+                showToast(`Could not log approval: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             setRiskLogged(true);
@@ -492,7 +491,7 @@ export default function ExecutiveDashboard() {
             showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setIsApproving(false);
         }
@@ -511,14 +510,14 @@ export default function ExecutiveDashboard() {
 </div>
 <div className="flex flex-wrap items-center gap-2">
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1 whitespace-nowrap">
-  <span className="material-symbols-outlined text-[14px] text-[#15803d]">check_circle</span> SIEM & CSPM Sync
+  <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[#15803d]">check_circle</span> SIEM & CSPM Sync
 </span>
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1 whitespace-nowrap">
-  <span className="material-symbols-outlined text-[14px] text-primary">policy</span> NIST CSF | RBI | SEBI
+  <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-primary">policy</span> ISO 27001 | RBI | SEBI
 </span>
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant whitespace-nowrap hidden sm:inline-flex">FY 2024</span>
 <button onClick={() => router.push('/reports')} className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 whitespace-nowrap">
-<span className="material-symbols-outlined text-[18px]">download</span> Export Report
+<span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span> Export Report
                      </button>
 </div>
 </div>
@@ -526,7 +525,7 @@ export default function ExecutiveDashboard() {
     <div className={`mb-stack-lg rounded-xl border p-stack-md flex items-start gap-3 animate-fade-scale-in ${
         driftInsight.tone === 'up' ? 'bg-error/5 border-error/30' : driftInsight.tone === 'down' ? 'bg-[#15803d]/5 border-[#15803d]/30' : 'bg-surface-container border-outline-variant'
     }`}>
-    <span className={`material-symbols-outlined text-[20px] mt-0.5 shrink-0 ${
+    <span aria-hidden="true" className={`material-symbols-outlined text-[20px] mt-0.5 shrink-0 ${
         driftInsight.tone === 'up' ? 'text-error' : driftInsight.tone === 'down' ? 'text-[#15803d]' : 'text-on-surface-variant'
     }`}>
         {driftInsight.tone === 'up' ? 'trending_up' : driftInsight.tone === 'down' ? 'trending_down' : 'trending_flat'}
@@ -537,7 +536,7 @@ export default function ExecutiveDashboard() {
         ))}
     </div>
     <a href="/reports" className="font-label-caps text-label-caps text-primary hover:underline whitespace-nowrap flex items-center gap-1 shrink-0">
-        Full ledger <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+        Full ledger <span aria-hidden="true" className="material-symbols-outlined text-[14px]">arrow_forward</span>
     </a>
     </div>
 )}
@@ -549,13 +548,13 @@ export default function ExecutiveDashboard() {
                 <p className="font-body-sm text-body-sm text-on-surface-variant">Three steps to see the full risk pipeline in action.</p>
             </div>
             <button onClick={dismissChecklist} className="text-on-surface-variant hover:text-primary shrink-0" aria-label="Dismiss checklist">
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[20px]">close</span>
             </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-stack-md">
             <div className={`rounded-lg border p-stack-md flex flex-col gap-2 ${dataGenerated ? 'border-[#15803d]/40 bg-[#15803d]/5' : 'border-outline-variant'}`}>
                 <div className="flex items-center gap-2">
-                    <span className={`material-symbols-outlined text-[20px] ${dataGenerated ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
+                    <span aria-hidden="true" className={`material-symbols-outlined text-[20px] ${dataGenerated ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
                         {dataGenerated ? 'check_circle' : 'radio_button_unchecked'}
                     </span>
                     <span className="font-body-sm text-body-sm font-semibold">1. Generate demo telemetry</span>
@@ -569,7 +568,7 @@ export default function ExecutiveDashboard() {
             </div>
             <div className={`rounded-lg border p-stack-md flex flex-col gap-2 ${simResults ? 'border-[#15803d]/40 bg-[#15803d]/5' : 'border-outline-variant'}`}>
                 <div className="flex items-center gap-2">
-                    <span className={`material-symbols-outlined text-[20px] ${simResults ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
+                    <span aria-hidden="true" className={`material-symbols-outlined text-[20px] ${simResults ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
                         {simResults ? 'check_circle' : 'radio_button_unchecked'}
                     </span>
                     <span className="font-body-sm text-body-sm font-semibold">2. Run a simulation</span>
@@ -578,7 +577,7 @@ export default function ExecutiveDashboard() {
             </div>
             <div className={`rounded-lg border p-stack-md flex flex-col gap-2 ${riskLogged ? 'border-[#15803d]/40 bg-[#15803d]/5' : 'border-outline-variant'}`}>
                 <div className="flex items-center gap-2">
-                    <span className={`material-symbols-outlined text-[20px] ${riskLogged ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
+                    <span aria-hidden="true" className={`material-symbols-outlined text-[20px] ${riskLogged ? 'text-[#15803d]' : 'text-on-surface-variant'}`}>
                         {riskLogged ? 'check_circle' : 'radio_button_unchecked'}
                     </span>
                     <span className="font-body-sm text-body-sm font-semibold">3. Log a risk decision</span>

@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import gaussian_kde
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 def run_fair_monte_carlo(
     tef_min: float, tef_mode: float, tef_max: float,  # Threat Event Frequency
@@ -9,14 +9,25 @@ def run_fair_monte_carlo(
     plm_min: float, plm_mode: float, plm_max: float,  # Primary Loss Magnitude
     slm_min: float, slm_mode: float, slm_max: float,  # Secondary Loss Magnitude
     num_simulations: int = 10000,
-    is_dpdp_applicable: bool = False                  # Flag for Native Indian Regulatory Grounding
+    is_dpdp_applicable: bool = False,                 # Flag for Native Indian Regulatory Grounding
+    # [Version the risk model fix] Every run now has a real, recorded
+    # seed - if the caller doesn't supply one, a fresh one is drawn and
+    # returned in the result (seed_used) so a run can be reproduced
+    # exactly by resubmitting the same FAIR inputs with that same seed,
+    # instead of every run being silently unreproducible (bare
+    # np.random.* calls with no seed at all, as this function used to
+    # use throughout).
+    seed: Optional[int] = None,
 ) -> Dict[str, Any]:
+    if seed is None:
+        seed = int(np.random.SeedSequence().entropy % (2**31 - 1))
+    rng = np.random.default_rng(seed)
     # 1. Simulate Threat Event Frequency (TEF)
-    tef = np.random.triangular(tef_min, tef_mode, tef_max, num_simulations)
+    tef = rng.triangular(tef_min, tef_mode, tef_max, num_simulations)
     
     # 2. Simulate Vulnerability (Probability that a Threat Event becomes a Loss Event)
-    threat_cap = np.random.triangular(tc_min, tc_mode, tc_max, num_simulations)
-    control_str = np.random.triangular(cs_min, cs_mode, cs_max, num_simulations)
+    threat_cap = rng.triangular(tc_min, tc_mode, tc_max, num_simulations)
+    control_str = rng.triangular(cs_min, cs_mode, cs_max, num_simulations)
 
     # Vulnerability is the probability TC > CS, scaled - smoothed into a
     # logistic function of the gap between the two instead of a hard
@@ -31,14 +42,14 @@ def run_fair_monte_carlo(
     # that's nearly unreachable in practice.
     gap = (control_str - threat_cap) / 15.0
     p_high_vulnerability = 1.0 / (1.0 + np.exp(gap))
-    is_high_vulnerability = np.random.uniform(0.0, 1.0, num_simulations) < p_high_vulnerability
-    vulnerability = np.where(is_high_vulnerability, np.random.uniform(0.6, 0.9, num_simulations), np.random.uniform(0.1, 0.4, num_simulations))
+    is_high_vulnerability = rng.uniform(0.0, 1.0, num_simulations) < p_high_vulnerability
+    vulnerability = np.where(is_high_vulnerability, rng.uniform(0.6, 0.9, num_simulations), rng.uniform(0.1, 0.4, num_simulations))
     
     # 3. Calculate Loss Event Frequency (LEF) = TEF * Vulnerability
     lef = tef * vulnerability
     
     # 4. Simulate Probable Loss Magnitude (PLM) = Primary + Secondary Loss
-    primary_loss = np.random.triangular(plm_min, plm_mode, plm_max, num_simulations)
+    primary_loss = rng.triangular(plm_min, plm_mode, plm_max, num_simulations)
     
     if is_dpdp_applicable:
         # [DPDP MANDATE] The DPDP Act's statutory penalties (up to ₹250 Cr
@@ -56,10 +67,10 @@ def run_fair_monte_carlo(
         # of overriding it with the statutory cap.
         slm_max_adjusted = slm_max * 2.0     # DPDP roughly doubles the realistic worst case
         slm_mode_adjusted = slm_mode * 1.5   # and raises the typical case by half
-        secondary_loss = np.random.triangular(slm_min, slm_mode_adjusted, slm_max_adjusted, num_simulations)
+        secondary_loss = rng.triangular(slm_min, slm_mode_adjusted, slm_max_adjusted, num_simulations)
         slm_max_used = slm_max_adjusted      # actual ceiling this distribution was drawn from
     else:
-        secondary_loss = np.random.triangular(slm_min, slm_mode, slm_max, num_simulations)
+        secondary_loss = rng.triangular(slm_min, slm_mode, slm_max, num_simulations)
         slm_max_used = slm_max
         
     total_loss_magnitude = primary_loss + secondary_loss
@@ -127,5 +138,10 @@ def run_fair_monte_carlo(
         "var_95": float(var_95),
         "var_99": float(var_99),
         "distribution_curve": curve,
-        "sebi_resilience": sebi_resilience
+        "sebi_resilience": sebi_resilience,
+        # [Version the risk model fix] the actual seed this run drew -
+        # always populated (never None), whether the caller supplied one
+        # or not, so every result can name exactly what would reproduce it.
+        "seed_used": int(seed),
+        "num_simulations": int(num_simulations),
     }

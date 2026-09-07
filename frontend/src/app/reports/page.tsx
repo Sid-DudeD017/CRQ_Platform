@@ -1,8 +1,19 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import dynamic from 'next/dynamic';
+
+// [Performance - fix] recharts is a sizeable dependency - code-splitting
+// it into its own chunk (ssr:false, since it reads from the DOM/canvas
+// and has no useful server-rendered output anyway) means visitors who
+// never scroll to a populated ledger, or who hit the "no simulations
+// yet" empty state above, never pay for it at all.
+const AleTrendChart = dynamic(() => import('@/components/charts/AleTrendChart'), {
+    ssr: false,
+    loading: () => <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />,
+});
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { EmptyState, ErrorState } from '@/components/StatusMessage';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 
@@ -299,10 +310,17 @@ export default function ReportsPage() {
     const [showAllFrameworkRows, setShowAllFrameworkRows] = useState(false);
 
     const fetchSnapshot = useCallback(async () => {
+        // [Cross-user data leakage fix] GET /api/audit-log now requires a
+        // valid bearer token (see backend/main.py) - it used to have no
+        // auth at all. This page lives behind SharedLayout's auth gate,
+        // so token should already be set by the time this runs.
+        if (!token) return;
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -312,13 +330,21 @@ export default function ReportsPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [dataSource]);
+    }, [dataSource, token]);
 
     const fetchSimulations = useCallback(async () => {
+        // [Cross-user data leakage fix] GET /api/simulations with
+        // data_source=own now requires a valid bearer token and is scoped
+        // to this account's own runs (see backend/main.py) - previously
+        // this had no auth and an omitted/own data_source could return
+        // every account's run history. Always send the token when
+        // available; the 'predefined' path still works fine with it.
         setIsSimLoading(true);
         setSimError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/simulations?limit=20&data_source=${dataSource}`);
+            const res = await fetchWithRetry(`${API_BASE}/api/simulations?limit=20&data_source=${dataSource}`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : undefined,
+            });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setSimulations(data.data || []);
@@ -328,7 +354,7 @@ export default function ReportsPage() {
         } finally {
             setIsSimLoading(false);
         }
-    }, [dataSource]);
+    }, [dataSource, token]);
 
     const refreshAll = useCallback(() => {
         fetchSnapshot();
@@ -545,7 +571,7 @@ export default function ReportsPage() {
                         title="Downloads a self-contained HTML report - open it in your browser and print to PDF if you need one"
                         className="landing-cta-gradient px-4 py-2 rounded font-body-sm text-body-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60 whitespace-nowrap"
                     >
-                        <span className="material-symbols-outlined text-[18px]">download</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span>
                         {isDownloading ? 'Preparing...' : 'Download Report'}
                     </button>
                     <button
@@ -553,7 +579,7 @@ export default function ReportsPage() {
                         disabled={isLoadingAny}
                         className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
                     >
-                        <span className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
+                        <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
                         Refresh
                     </button>
                 </div>
@@ -622,9 +648,9 @@ export default function ReportsPage() {
                             className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-3 py-1.5 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap shrink-0"
                         >
                             {isSeeding ? (
-                                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
                             ) : (
-                                <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">auto_awesome</span>
                             )}
                             {isSeeding && seedProgress ? `Seeding ${seedProgress.current}/${seedProgress.total}...` : 'Seed Demo Runs'}
                         </button>
@@ -640,24 +666,28 @@ export default function ReportsPage() {
                         ))}
                     </div>
                 ) : simError ? (
-                    <p className="font-body-sm text-body-sm text-error">{simError}</p>
+                    <ErrorState
+                        title="Couldn't load the analysis ledger"
+                        whatHappened={simError}
+                        whyItHappened="The backend may be offline, or the request timed out."
+                        nextStep="Retry below, or confirm the backend is running on port 8000."
+                        dataSaved="yes"
+                        retrySafe={true}
+                        onRetry={fetchSimulations}
+                    />
                 ) : simulations.length === 0 ? (
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">
-                        No simulations run yet - click &quot;Run Simulation&quot; on the Overview page to populate this ledger.
-                    </p>
+                    <EmptyState
+                        icon="query_stats"
+                        title="No simulations yet"
+                        description="This ledger fills in once a Monte Carlo simulation has been run and its result persisted. Nothing has failed - there's simply no history to show yet."
+                        actionLabel="Run a simulation on Overview"
+                        actionHref="/overview"
+                    />
                 ) : (
                     <>
                         {/* ALE trend chart */}
                         <div className="w-full bg-surface-container-low rounded border border-outline-variant border-dashed mb-stack-md" style={{ height: 180 }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={chartData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--outline-variant)" />
-                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--on-surface-variant)' }} />
-                                    <YAxis tick={{ fontSize: 11, fill: 'var(--on-surface-variant)' }} tickFormatter={(v) => `₹${v.toFixed(1)}Cr`} width={64} />
-                                    <Tooltip formatter={(value: any) => [`₹${Number(value).toFixed(2)} Cr`, 'Expected Annual Loss']} />
-                                    <Line type="monotone" dataKey="ale" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} />
-                                </LineChart>
-                            </ResponsiveContainer>
+                            <AleTrendChart data={chartData} />
                         </div>
 
                         {/* Insights */}
@@ -671,7 +701,7 @@ export default function ReportsPage() {
                                             : 'border-outline-variant bg-surface-container-low'
                                 }`}
                             >
-                                <span
+                                <span aria-hidden="true"
                                     className={`material-symbols-outlined text-[20px] mt-0.5 ${
                                         insights.tone === 'down' ? 'text-[#15803d]' : insights.tone === 'up' ? 'text-error' : 'text-on-surface-variant'
                                     }`}
@@ -689,7 +719,7 @@ export default function ReportsPage() {
                             </div>
                         ) : (
                             <div className="rounded-lg p-stack-md mb-stack-md border border-outline-variant bg-surface-container-low flex gap-stack-sm items-start">
-                                <span className="material-symbols-outlined text-[20px] text-on-surface-variant mt-0.5">info</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant mt-0.5">info</span>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant">
                                     Run at least two simulations from Overview to see trend analysis and suggestions here.
                                 </p>
@@ -754,7 +784,7 @@ export default function ReportsPage() {
                                 onClick={() => setShowAllRuns((v) => !v)}
                                 className="mt-stack-md w-full border border-outline-variant border-dashed rounded py-2 font-label-caps text-label-caps text-on-surface-variant hover:text-primary hover:border-primary transition-colors flex items-center justify-center gap-1"
                             >
-                                <span className="material-symbols-outlined text-[16px]">{showAllRuns ? 'expand_less' : 'expand_more'}</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{showAllRuns ? 'expand_less' : 'expand_more'}</span>
                                 {showAllRuns ? 'Show fewer runs' : `Show all ${simulations.length} runs`}
                             </button>
                         )}
@@ -832,7 +862,7 @@ export default function ReportsPage() {
                                         onClick={() => setShowAllFrameworkRows((v) => !v)}
                                         className="mt-stack-md w-full border border-outline-variant border-dashed rounded py-2 font-label-caps text-label-caps text-on-surface-variant hover:text-primary hover:border-primary transition-colors flex items-center justify-center gap-1"
                                     >
-                                        <span className="material-symbols-outlined text-[16px]">{showAllFrameworkRows ? 'expand_less' : 'expand_more'}</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{showAllFrameworkRows ? 'expand_less' : 'expand_more'}</span>
                                         {showAllFrameworkRows ? 'Show active controls only' : `Show all ${coverage.length} controls`}
                                     </button>
                                 )}
@@ -852,7 +882,7 @@ export default function ReportsPage() {
                     {REPORT_LIBRARY.map((report, i) => (
                         <div key={i} className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col gap-stack-sm">
                             <div className="flex items-center gap-stack-sm">
-                                <span className="material-symbols-outlined text-[22px] text-primary">{report.icon}</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[22px] text-primary">{report.icon}</span>
                                 <span className="font-label-caps text-label-caps px-2 py-0.5 bg-secondary-container text-on-secondary-container rounded">{report.framework}</span>
                             </div>
                             <div className="font-body-sm text-body-sm font-semibold">{report.title}</div>
@@ -868,7 +898,7 @@ export default function ReportsPage() {
             {/* Note on generation */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                 <div className="flex gap-stack-sm items-start">
-                    <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
                     <p className="font-body-sm text-body-sm text-on-surface-variant">
                         Every number on this page is computed on demand from live telemetry, the audit ledger, and persisted simulation runs - nothing here is a static export. Run a simulation on Overview or accept a risk, then hit Refresh above.
                     </p>

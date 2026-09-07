@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { useServiceStatus } from '@/lib/useServiceStatus';
 
 interface Decision {
     id: number;
@@ -19,6 +20,12 @@ interface Decision {
     // never a broken one.
     board_approved?: boolean;
     model_snapshot?: string | null;
+    // [Version the risk model fix] Independent of model_snapshot (the
+    // backend app build) - see backend/risk_engine.py's MODEL_VERSION/
+    // CONTROL_LIBRARY_VERSION comment for why these are tracked
+    // separately.
+    model_version?: string | null;
+    control_library_version?: string | null;
     residual_ale?: number | null;
     p95?: number | null;
     accepted_scenario?: string | null;
@@ -36,6 +43,12 @@ function truncateHash(hash: string) {
 export default function LedgerPage() {
     const { token, username } = useAuth();
     const { showToast } = useToast();
+    // [No degraded-mode / service-health feedback - fix] DB-only vs
+    // on-chain distinction: previously the only way to find out the
+    // local blockchain node wasn't reachable was clicking "Connect to
+    // Blockchain" and getting a 503 toast, one decision at a time. This
+    // surfaces it up front for the whole ledger.
+    const { data: serviceStatus } = useServiceStatus();
     const [decisions, setDecisions] = useState<Decision[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -53,6 +66,15 @@ export default function LedgerPage() {
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
     const [resetError, setResetError] = useState<string | null>(null);
+    // [Confirmation for destructive actions fix] A full reset wipes far
+    // more than this one ledger (see backend/main.py::reset_demo -
+    // calibration/incident history, training completions, ingestion
+    // mappings, both dashboards' fleets) and can't be undone, so it needs
+    // a deliberate typed confirmation rather than just a second click -
+    // the same 'type the word to confirm' pattern used for any
+    // irreversible, wide-blast-radius action.
+    const RESET_CONFIRM_WORD = 'RESET';
+    const [resetConfirmText, setResetConfirmText] = useState('');
     const [committingId, setCommittingId] = useState<number | null>(null);
 
     // [Separate ledgers per dashboard] Demo (Overview) and Own Data
@@ -78,10 +100,20 @@ export default function LedgerPage() {
     }, [username]);
 
     const fetchLedger = useCallback(async () => {
+        // [Cross-user data leakage fix] GET /api/audit-log now requires a
+        // valid bearer token (see backend/main.py) - it used to have no
+        // auth at all, which is exactly how one account's Own Data Ledger
+        // could show another account's decisions. This page is already
+        // gated behind SharedLayout's `if (!token)` check, so token should
+        // always be set by the time this runs - but guard anyway rather
+        // than firing an unauthenticated request that would now 401.
+        if (!token) return;
         setIsLoading(true);
         setError(null);
         try {
-            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`);
+            const res = await fetchWithRetry(`${API_BASE}/api/audit-log?data_source=${dataSource}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions(data.data || []);
@@ -91,7 +123,7 @@ export default function LedgerPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [dataSource]);
+    }, [dataSource, token]);
 
     useEffect(() => {
         if (!dataSourceHydrated) return;
@@ -160,6 +192,7 @@ export default function LedgerPage() {
             if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
             setDecisions([]);
             setIsResetModalOpen(false);
+            setResetConfirmText('');
             showToast('Demo reset to pristine state - fresh demo and own-data fleets regenerated.', 'success');
             fetchLedger();
         } catch (e: any) {
@@ -169,6 +202,35 @@ export default function LedgerPage() {
             showToast(message, 'error');
         } finally {
             setIsResetting(false);
+        }
+    };
+
+    // [Confirmation for destructive actions fix] A client-side JSON
+    // backup of exactly what's about to be deleted - no backend export
+    // endpoint needed since the full decision list is already loaded
+    // here. Offered right on the confirmation modal so backing up isn't
+    // a separate trip somewhere else before doing something irreversible.
+    const exportLedgerBackup = () => {
+        try {
+            const payload = {
+                exported_at: new Date().toISOString(),
+                ledger: dataSource === 'own' ? 'Own Data Ledger' : 'Demo Ledger',
+                data_source: dataSource,
+                decision_count: decisions.length,
+                decisions,
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `crq_ledger_backup_${dataSource}_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`Backed up ${decisions.length} decision${decisions.length === 1 ? '' : 's'} to a JSON file.`, 'success');
+        } catch (e) {
+            showToast('Could not create a backup file in this browser.', 'error');
         }
     };
 
@@ -232,7 +294,7 @@ export default function LedgerPage() {
                             disabled={isLoading}
                             className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
                         >
-                            <span className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
+                            <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
                             Refresh
                         </button>
                         <button
@@ -241,16 +303,16 @@ export default function LedgerPage() {
                             title={!token ? 'Log in first (top-right corner) to clear the ledger' : 'Delete every logged decision and reset to 0'}
                             className="border border-outline-variant text-error bg-surface hover:bg-error/10 hover:border-error px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-40 disabled:hover:bg-surface disabled:hover:border-outline-variant whitespace-nowrap"
                         >
-                            <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">delete_sweep</span>
                             Clear Ledger
                         </button>
                         <button
-                            onClick={() => { setResetError(null); setIsResetModalOpen(true); }}
+                            onClick={() => { setResetError(null); setResetConfirmText(''); setIsResetModalOpen(true); }}
                             disabled={isLoading || !token}
                             title={!token ? 'Log in first (top-right corner) to reset the demo' : 'Reset every dashboard back to a pristine, freshly-seeded state'}
                             className="border border-outline-variant text-error bg-surface hover:bg-error/10 hover:border-error px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-40 disabled:hover:bg-surface disabled:hover:border-outline-variant whitespace-nowrap"
                         >
-                            <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">restart_alt</span>
                             Reset Full Demo
                         </button>
                     </div>
@@ -276,6 +338,13 @@ export default function LedgerPage() {
                 </div>
             </div>
 
+            {serviceStatus?.blockchain === 'unavailable' && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded border border-outline-variant bg-surface-container-low font-body-sm text-body-sm text-on-surface-variant">
+                    <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">dns</span>
+                    <span>No local blockchain node reachable right now - decisions below are stored in the database only. &quot;Connect to Blockchain&quot; will fail until a Hardhat node is running (see Support for setup steps); nothing here is lost, it just isn&apos;t on-chain yet.</span>
+                </div>
+            )}
+
             {/* Table */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden">
                 {isLoading ? (
@@ -290,7 +359,7 @@ export default function LedgerPage() {
                     </div>
                 ) : decisions.length === 0 ? (
                     <div className="p-gutter text-center">
-                        <span className="material-symbols-outlined text-[40px] text-outline mb-2">receipt_long</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[40px] text-outline mb-2">receipt_long</span>
                         <p className="font-body-sm text-body-sm text-on-surface-variant">
                             No {dataSource === 'own' ? 'own-data' : 'demo'} risk decisions logged yet - click &quot;Accept Risk&quot; on the {dataSource === 'own' ? 'Ingestion Engine' : 'Overview'} page to create one.
                         </p>
@@ -329,13 +398,13 @@ export default function LedgerPage() {
                                                     title="Click to copy full transaction hash"
                                                     className="flex items-center gap-1 px-2 py-1 bg-[#15803d]/10 text-[#15803d] rounded font-data-mono text-data-mono hover:bg-[#15803d]/20 transition-colors"
                                                 >
-                                                    <span className="material-symbols-outlined text-[14px]">link</span>
+                                                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">link</span>
                                                     {copiedId === d.id ? 'Copied!' : truncateHash(d.tx_hash)}
                                                 </button>
                                             ) : (
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="flex items-center gap-1 px-2 py-1 bg-surface-container text-on-surface-variant rounded font-label-caps text-label-caps">
-                                                        <span className="material-symbols-outlined text-[14px]">database</span>
+                                                        <span aria-hidden="true" className="material-symbols-outlined text-[14px]">database</span>
                                                         Off-chain
                                                     </span>
                                                     <button
@@ -345,9 +414,9 @@ export default function LedgerPage() {
                                                         className="flex items-center gap-1 px-2 py-1 landing-cta-gradient rounded font-label-caps text-label-caps font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 whitespace-nowrap"
                                                     >
                                                         {committingId === d.id ? (
-                                                            <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                                                            <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
                                                         ) : (
-                                                            <span className="material-symbols-outlined text-[14px]">link</span>
+                                                            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">link</span>
                                                         )}
                                                         {committingId === d.id ? 'Connecting...' : 'Connect to Blockchain'}
                                                     </button>
@@ -358,32 +427,68 @@ export default function LedgerPage() {
                                             <button
                                                 onClick={() => setExpandedPassportId(expandedPassportId === d.id ? null : d.id)}
                                                 title="View this decision's full Risk Decision Passport"
+                                                aria-expanded={expandedPassportId === d.id}
+                                                aria-controls={`passport-${d.id}`}
                                                 className="flex items-center gap-1 px-2 py-1 border border-outline-variant rounded font-label-caps text-label-caps text-on-surface-variant hover:bg-surface-container-low transition-colors"
                                             >
-                                                <span className="material-symbols-outlined text-[14px]">{expandedPassportId === d.id ? 'expand_less' : 'badge'}</span>
+                                                <span aria-hidden="true" className="material-symbols-outlined text-[14px]">{expandedPassportId === d.id ? 'expand_less' : 'badge'}</span>
                                                 {expandedPassportId === d.id ? 'Hide' : 'View'}
                                             </button>
                                         </td>
                                     </tr>
                                     {expandedPassportId === d.id && (() => {
+                                        // [Governance evidence fix] "Not available" instead of a bare
+                                        // dash - a blank-looking "-" next to a clean "Board-approved"
+                                        // badge is exactly what made the reported bug invisible; a
+                                        // labeled gap reads as missing evidence, not as "nothing to see
+                                        // here". Legacy decisions logged before POST /api/audit started
+                                        // requiring evidence for board_approved can still have gaps like
+                                        // this - the backend now blocks NEW board-approved decisions
+                                        // from having them (see main.py::log_audit), but this passport
+                                        // still has to render old rows honestly.
+                                        const notAvailable = <span className="text-on-surface-variant italic">Not available</span>;
+                                        const criticalGaps = [
+                                            !d.model_snapshot && 'Model snapshot',
+                                            typeof d.residual_ale !== 'number' && 'Residual ALE',
+                                            typeof d.p95 !== 'number' && 'P95 (VaR)',
+                                            !d.accepted_scenario && 'Accepted scenario',
+                                            !d.evidence_hash && 'Evidence hash',
+                                            !d.review_expiry && 'Review / expiry',
+                                        ].filter(Boolean) as string[];
+                                        const incompleteApproval = !!d.board_approved && criticalGaps.length > 0;
                                         const rows: { label: string; value: React.ReactNode }[] = [
                                             { label: 'Risk owner', value: d.decided_by },
-                                            { label: 'Model snapshot', value: d.model_snapshot ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_snapshot}</code> : '—' },
-                                            { label: 'Residual ALE', value: typeof d.residual_ale === 'number' ? `₹${(d.residual_ale / 10000000).toFixed(2)} Cr` : '—' },
-                                            { label: 'P95 (VaR)', value: typeof d.p95 === 'number' ? `₹${(d.p95 / 10000000).toFixed(2)} Cr` : '—' },
-                                            { label: 'Accepted scenario', value: d.accepted_scenario || '—' },
+                                            { label: 'Model snapshot', value: d.model_snapshot ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_snapshot}</code> : notAvailable },
+                                            { label: 'Risk model version', value: d.model_version ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_version}</code> : notAvailable },
+                                            { label: 'Control library version', value: d.control_library_version ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.control_library_version}</code> : notAvailable },
+                                            { label: 'Residual ALE', value: typeof d.residual_ale === 'number' ? `₹${(d.residual_ale / 10000000).toFixed(2)} Cr` : notAvailable },
+                                            { label: 'P95 (VaR)', value: typeof d.p95 === 'number' ? `₹${(d.p95 / 10000000).toFixed(2)} Cr` : notAvailable },
+                                            { label: 'Accepted scenario', value: d.accepted_scenario || notAvailable },
                                             { label: 'Recommended control not funded', value: d.recommended_control_not_funded || 'None - fully funded to the optimizer\'s recommendation' },
-                                            { label: 'Reason', value: d.reason || '—' },
-                                            { label: 'Evidence hash', value: d.evidence_hash ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded break-all">{d.evidence_hash}</code> : '—' },
-                                            { label: 'Approvals', value: d.board_approved ? 'Board-approved' : `${d.decided_by} (individual acceptance)` },
+                                            { label: 'Reason', value: d.reason || notAvailable },
+                                            { label: 'Evidence hash', value: d.evidence_hash ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded break-all">{d.evidence_hash}</code> : notAvailable },
+                                            {
+                                                label: 'Approvals',
+                                                value: d.board_approved
+                                                    ? (incompleteApproval
+                                                        ? <span className="text-error font-semibold inline-flex items-center gap-1 justify-end"><span aria-hidden="true" className="material-symbols-outlined text-[14px]">warning</span>Board-approved (incomplete evidence)</span>
+                                                        : 'Board-approved')
+                                                    : `${d.decided_by} (individual acceptance)`,
+                                            },
                                             { label: 'Decision date', value: new Date(d.created_at).toLocaleString() },
-                                            { label: 'Review / expiry', value: d.review_expiry ? new Date(d.review_expiry).toLocaleDateString() : '—' },
+                                            { label: 'Review / expiry', value: d.review_expiry ? new Date(d.review_expiry).toLocaleDateString() : notAvailable },
                                             { label: 'Ledger hash', value: d.on_chain && d.tx_hash ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded break-all">{d.tx_hash}</code> : 'Off-chain' },
                                         ];
                                         return (
-                                            <tr key={`${d.id}-passport`} className="border-b border-outline-variant last:border-0 bg-surface-container-low/60">
+                                            <tr id={`passport-${d.id}`} key={`${d.id}-passport`} className="border-b border-outline-variant last:border-0 bg-surface-container-low/60">
                                                 <td colSpan={7} className="px-4 py-4">
                                                     <div className="mb-2 font-title-lg text-title-lg text-primary">Risk Decision Passport - #{d.id}</div>
+                                                    {incompleteApproval && (
+                                                        <div className="mb-3 flex items-start gap-2 px-3 py-2 rounded border border-error/30 bg-error/10 text-error font-body-sm text-body-sm">
+                                                            <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">warning</span>
+                                                            <span>This decision is marked board-approved but is missing required evidence ({criticalGaps.join(', ')}) - it predates the evidence requirement now enforced on new decisions. Treat it as unverified until it&apos;s re-reviewed.</span>
+                                                        </div>
+                                                    )}
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
                                                         {rows.map((r) => (
                                                             <div key={r.label} className="flex justify-between gap-3 border-b border-outline-variant/50 py-1">
@@ -415,7 +520,7 @@ export default function LedgerPage() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-start gap-stack-sm mb-stack-md">
-                            <span className="material-symbols-outlined text-error text-[28px]">warning</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-error text-[28px]">warning</span>
                             <div>
                                 <h3 className="font-title-lg text-title-lg text-primary">Clear the entire ledger?</h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
@@ -423,12 +528,22 @@ export default function LedgerPage() {
                                 </p>
                                 {clearError && (
                                     <p className="font-body-sm text-body-sm text-error mt-stack-sm flex items-start gap-1">
-                                        <span className="material-symbols-outlined text-[16px] mt-0.5">error</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">error</span>
                                         {clearError}
                                     </p>
                                 )}
                             </div>
                         </div>
+                        {decisions.length > 0 && (
+                            <button
+                                onClick={exportLedgerBackup}
+                                disabled={isClearing}
+                                className="w-full mb-stack-sm px-4 py-2 border border-outline-variant text-primary rounded font-body-sm text-body-sm hover:border-primary transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                            >
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">download</span>
+                                Export a backup first (JSON, {decisions.length} decision{decisions.length === 1 ? '' : 's'})
+                            </button>
+                        )}
                         <div className="flex justify-end gap-stack-sm">
                             <button
                                 onClick={() => { setIsClearModalOpen(false); setClearError(null); }}
@@ -442,7 +557,7 @@ export default function LedgerPage() {
                                 disabled={isClearing}
                                 className="px-4 py-2 bg-error text-on-error rounded font-body-sm text-body-sm font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-60 flex items-center gap-2"
                             >
-                                {isClearing && <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
+                                {isClearing && <span aria-hidden="true" className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
                                 {isClearing ? 'Clearing...' : 'Clear Ledger'}
                             </button>
                         </div>
@@ -451,13 +566,13 @@ export default function LedgerPage() {
             )}
 
             {isResetModalOpen && (
-                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => !isResetting && setIsResetModalOpen(false)}>
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => { if (!isResetting) { setIsResetModalOpen(false); setResetConfirmText(''); } }}>
                     <div
                         className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter w-full max-w-md shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-start gap-stack-sm mb-stack-md">
-                            <span className="material-symbols-outlined text-error text-[28px]">warning</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-error text-[28px]">warning</span>
                             <div>
                                 <h3 className="font-title-lg text-title-lg text-primary">Reset the entire demo?</h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
@@ -469,15 +584,44 @@ export default function LedgerPage() {
                                 </p>
                                 {resetError && (
                                     <p className="font-body-sm text-body-sm text-error mt-stack-sm flex items-start gap-1">
-                                        <span className="material-symbols-outlined text-[16px] mt-0.5">error</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">error</span>
                                         {resetError}
                                     </p>
                                 )}
                             </div>
                         </div>
+
+                        {decisions.length > 0 && (
+                            <button
+                                onClick={exportLedgerBackup}
+                                disabled={isResetting}
+                                className="w-full mb-stack-sm px-4 py-2 border border-outline-variant text-primary rounded font-body-sm text-body-sm hover:border-primary transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+                            >
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">download</span>
+                                Export this ledger first (JSON, {decisions.length} decision{decisions.length === 1 ? '' : 's'})
+                            </button>
+                        )}
+                        <p className="font-body-sm text-[12px] text-on-surface-variant mb-stack-md">
+                            This only backs up the ledger shown here - for a full record of the current numbers (ALE, calibration, optimization) before resetting, use Download Report on the Reports page first.
+                        </p>
+
+                        <label htmlFor="reset-confirm-input" className="font-label-caps text-label-caps text-on-surface-variant block mb-1">
+                            Type {RESET_CONFIRM_WORD} to confirm
+                        </label>
+                        <input
+                            id="reset-confirm-input"
+                            type="text"
+                            value={resetConfirmText}
+                            onChange={(e) => setResetConfirmText(e.target.value)}
+                            disabled={isResetting}
+                            autoComplete="off"
+                            placeholder={RESET_CONFIRM_WORD}
+                            className="w-full mb-stack-md px-3 py-2 border border-outline-variant rounded font-data-mono text-data-mono bg-surface text-on-surface disabled:opacity-60"
+                        />
+
                         <div className="flex justify-end gap-stack-sm">
                             <button
-                                onClick={() => { setIsResetModalOpen(false); setResetError(null); }}
+                                onClick={() => { setIsResetModalOpen(false); setResetError(null); setResetConfirmText(''); }}
                                 disabled={isResetting}
                                 className="px-4 py-2 border border-outline-variant text-on-surface rounded font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-60"
                             >
@@ -485,10 +629,11 @@ export default function LedgerPage() {
                             </button>
                             <button
                                 onClick={resetDemo}
-                                disabled={isResetting}
-                                className="px-4 py-2 bg-error text-on-error rounded font-body-sm text-body-sm font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-60 flex items-center gap-2"
+                                disabled={isResetting || resetConfirmText.trim().toUpperCase() !== RESET_CONFIRM_WORD}
+                                title={resetConfirmText.trim().toUpperCase() !== RESET_CONFIRM_WORD ? `Type ${RESET_CONFIRM_WORD} above to enable this button` : undefined}
+                                className="px-4 py-2 bg-error text-on-error rounded font-body-sm text-body-sm font-semibold hover:bg-opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                             >
-                                {isResetting && <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
+                                {isResetting && <span aria-hidden="true" className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>}
                                 {isResetting ? 'Resetting...' : 'Reset Full Demo'}
                             </button>
                         </div>

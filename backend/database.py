@@ -72,12 +72,52 @@ def _add_missing_columns() -> None:
                 print(f"[init_db] Could not add column {table_name}.{col.name}: {e}")
 
 
+def _add_missing_indexes() -> None:
+    """
+    [Performance - fix] Companion to _add_missing_columns above, and for
+    the identical reason: SQLModel.metadata.create_all() only creates
+    indexes as part of creating a brand-new table - it never retrofits an
+    index onto a table that already exists. So marking a field
+    `index=True` on a model (as this session's fix just did for every
+    table's `data_source` column, to speed up the owner_email +
+    data_source filters every 'own data' query in main.py runs) would
+    silently do nothing for anyone whose database already existed before
+    that change. This diffs each table's live indexes against which
+    columns the model declares `index=True` for for and adds any that are
+    missing - additive only, never drops or rebuilds an existing index,
+    and (like _add_missing_columns) isolates each attempt so one failure
+    can't block the others or crash startup.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table_name, table in SQLModel.metadata.tables.items():
+        if table_name not in existing_tables:
+            continue
+        existing_indexed_cols = set()
+        for idx in inspector.get_indexes(table_name):
+            cols = idx.get("column_names") or []
+            if len(cols) == 1 and cols[0]:
+                existing_indexed_cols.add(cols[0])
+        for col in table.columns:
+            if not col.index or col.name in existing_indexed_cols or col.primary_key:
+                continue
+            index_name = f"ix_crq_autofix_{table_name}_{col.name}"
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{table_name}" ("{col.name}")'))
+                print(f"[init_db] Added missing index {index_name} on {table_name}.{col.name}")
+            except Exception as e:
+                print(f"[init_db] Could not add index on {table_name}.{col.name}: {e}")
+
+
 def init_db() -> None:
     """Create all tables, then repair any that already existed under an
-    older schema (see _add_missing_columns). Safe to call more than once."""
+    older schema (see _add_missing_columns/_add_missing_indexes). Safe to
+    call more than once."""
     from . import models  # noqa: F401 - populate metadata before create_all
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _add_missing_indexes()
 
 
 def get_db():

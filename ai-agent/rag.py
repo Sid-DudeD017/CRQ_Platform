@@ -1,4 +1,6 @@
 import os
+from functools import lru_cache
+
 import chromadb
 from langchain_core.tools import tool
 
@@ -24,13 +26,21 @@ if compliance_collection.count() == 0:
     metadatas = [{"source": "RBI"}, {"source": "SEBI"}, {"source": "NIST"}, {"source": "DPDP"}]
     compliance_collection.add(documents=mock_docs, metadatas=metadatas, ids=ids)
 
-@tool
-def search_compliance_frameworks(query: str, n_results: int = 3) -> str:
+@lru_cache(maxsize=256)
+def _search_compliance_frameworks_cached(query: str, n_results: int) -> str:
     """
-    Searches the RAG pipeline (ChromaDB) for relevant regulatory and compliance information
-    regarding RBI, SEBI, NIST, and DPDP frameworks. Each retrieved passage is tagged with
-    which framework it actually came from, so the answer can be traced back to a real
-    source document instead of reading as an unverifiable model claim.
+    [Performance - fix] The regulatory framework corpus (RBI/SEBI/NIST/
+    DPDP passages, seeded once at import time above) never changes at
+    runtime, but every Virtual CISO answer that touches compliance was
+    re-querying ChromaDB from scratch even for a question worded
+    identically to one asked a minute earlier by the same or another
+    visitor. This is exactly the "cache stable documentation" case - an
+    in-process LRU cache (no extra infra, matches this backend's existing
+    dependency-free-where-possible approach - see observability.py) skips
+    the repeat ChromaDB round-trip for a repeated (query, n_results) pair
+    within this process's lifetime. Split out from the @tool-decorated
+    function below since LangChain tool wrappers aren't reliably
+    hashable/cacheable themselves.
     """
     results = compliance_collection.query(
         query_texts=[query],
@@ -52,3 +62,14 @@ def search_compliance_frameworks(query: str, n_results: int = 3) -> str:
     body = "\n\n".join(tagged_passages)
     footer = f"\n\n(Retrieved from: {', '.join(sources)}. Always name the specific framework(s) above when answering, and end your answer with a line like \"Sources: RBI, SEBI\" listing exactly which of these were actually used.)"
     return body + footer
+
+
+@tool
+def search_compliance_frameworks(query: str, n_results: int = 3) -> str:
+    """
+    Searches the RAG pipeline (ChromaDB) for relevant regulatory and compliance information
+    regarding RBI, SEBI, NIST, and DPDP frameworks. Each retrieved passage is tagged with
+    which framework it actually came from, so the answer can be traced back to a real
+    source document instead of reading as an unverifiable model claim.
+    """
+    return _search_compliance_frameworks_cached(query, n_results)

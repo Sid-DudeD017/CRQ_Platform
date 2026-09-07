@@ -27,6 +27,21 @@ Design choices worth calling out:
 """
 import re
 from dataclasses import dataclass
+
+# [AI safety fix - prompt injection from uploaded documents] This module
+# is the ONLY place an uploaded device config is ever parsed, and it is
+# pure regex matching (_LINE_RULES/_NEIGHBOR_RE above) - the raw config
+# text is never passed into an LLM prompt anywhere in this codebase (see
+# backend/main.py's /api/chat, which only ever sends the user's own
+# chat message and a data_source flag, never uploaded file content).
+# That means a config crafted to contain prompt-injection text (e.g. a
+# comment line reading "ignore previous instructions and...") has no
+# path to reach the Virtual CISO's model context - it can only ever
+# match (or fail to match) one of the fixed rules below. If this module
+# ever grows an LLM-assisted parsing fallback, that new code path MUST
+# treat file content as untrusted and never concatenate it directly into
+# a system/instruction prompt - this comment is the tripwire for that
+# review.
 from typing import List
 
 

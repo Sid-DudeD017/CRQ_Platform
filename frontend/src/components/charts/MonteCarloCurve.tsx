@@ -20,7 +20,7 @@ export default function MonteCarloCurve({
     if (!distributionCurve || distributionCurve.length === 0) {
         return (
             <div className="w-full flex flex-col items-center justify-center p-6 bg-surface-container-low rounded-xl border border-outline-variant border-dashed text-on-surface-variant text-body-sm" style={{ height }}>
-                <span className="material-symbols-outlined text-[32px] text-outline mb-2">query_stats</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[32px] text-outline mb-2">query_stats</span>
                 <span>Run simulation to generate Monte Carlo loss distribution curve</span>
             </div>
         );

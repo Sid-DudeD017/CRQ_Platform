@@ -96,7 +96,7 @@ export default function DocsPage() {
             <details id="architecture" open className="group bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter scroll-mt-gutter">
                 <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden font-title-lg text-title-lg text-primary mb-stack-md">
                     Architecture
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
                 </summary>
                 <div className="flex flex-col gap-stack-sm">
                     {ARCHITECTURE.map((row, i) => (
@@ -115,7 +115,7 @@ export default function DocsPage() {
             <details id="api-reference" open className="group bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter scroll-mt-gutter">
                 <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden font-title-lg text-title-lg text-primary mb-stack-md">
                     API Reference
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
                 </summary>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
@@ -148,12 +148,12 @@ export default function DocsPage() {
             <details id="data-model" className="group bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter scroll-mt-gutter">
                 <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden font-title-lg text-title-lg text-primary mb-stack-md group-open:mb-stack-md">
                     Data Model
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
                 </summary>
                 <div className="flex flex-col gap-stack-sm">
                     {DATA_MODEL.map((row, i) => (
                         <div key={i} className="flex gap-stack-sm items-start">
-                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">table_rows</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">table_rows</span>
                             <div>
                                 <span className="font-data-mono text-data-mono font-semibold">{row.name}</span>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant">{row.detail}</p>
@@ -167,7 +167,7 @@ export default function DocsPage() {
             <details id="compliance-frameworks" className="group bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter scroll-mt-gutter">
                 <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden font-title-lg text-title-lg text-primary mb-stack-md group-open:mb-stack-md">
                     Compliance Frameworks Modeled
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
                 </summary>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-stack-md">
                     {FRAMEWORKS.map((f, i) => (
@@ -189,7 +189,7 @@ export default function DocsPage() {
             <details id="deployment" className="group bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter scroll-mt-gutter">
                 <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden font-title-lg text-title-lg text-primary mb-stack-md group-open:mb-stack-md">
                     Deployment
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant transition-transform group-open:rotate-180">expand_more</span>
                 </summary>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">
                     The hosted demo runs the frontend on Vercel and the backend on Render, backed by a Neon Postgres database. The on-chain audit trail requires a local Hardhat node and is only available when running the stack locally - decisions still persist to the database either way.

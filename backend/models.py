@@ -59,7 +59,19 @@ class Asset(SQLModel, table=True):
     # rows (data_source=NULL after this column is added to an existing
     # database) keep resolving as demo data - see the OR-NULL matching in
     # derive_fair_inputs/generators.populate_database.
-    data_source: str = Field(default="predefined")
+    data_source: str = Field(default="predefined", index=True)
+
+    # [Cross-user data isolation] Which account's "own" data this row
+    # belongs to - whatever backend.security.get_current_user returned at
+    # write time (a real account's email, or "ciso"/"cfo" for the two
+    # demo accounts). Always None for data_source="predefined" rows - the
+    # shared demo fleet is intentionally common to every account, not
+    # owned by any one of them. Every "own"-scoped read in risk_engine.py/
+    # main.py now filters by this in addition to data_source, so one
+    # account's ingested environment, simulations, and ledger never show
+    # up for a different account that also happens to be using "Enter
+    # your own data".
+    owner_email: Optional[str] = Field(default=None, index=True)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -112,7 +124,19 @@ class TelemetryLog(SQLModel, table=True):
     # TelemetryLog rather than requiring a join through asset_id, since
     # derive_fair_inputs' latest_logs query needs to filter by mode
     # directly.
-    data_source: str = Field(default="predefined")
+    data_source: str = Field(default="predefined", index=True)
+
+    # [Cross-user data isolation] Which account's "own" data this row
+    # belongs to - whatever backend.security.get_current_user returned at
+    # write time (a real account's email, or "ciso"/"cfo" for the two
+    # demo accounts). Always None for data_source="predefined" rows - the
+    # shared demo fleet is intentionally common to every account, not
+    # owned by any one of them. Every "own"-scoped read in risk_engine.py/
+    # main.py now filters by this in addition to data_source, so one
+    # account's ingested environment, simulations, and ledger never show
+    # up for a different account that also happens to be using "Enter
+    # your own data".
+    owner_email: Optional[str] = Field(default=None, index=True)
 
 class NetworkEdge(SQLModel, table=True):
     """
@@ -159,7 +183,46 @@ class RiskSimulation(SQLModel, table=True):
     # GET /api/simulations (the Reports page's run history) show two
     # distinct trend lines instead of interleaving demo and own-data runs
     # in one undifferentiated history.
-    data_source: str = Field(default="predefined")
+    data_source: str = Field(default="predefined", index=True)
+
+    # [Cross-user data isolation] Which account's "own" data this row
+    # belongs to - whatever backend.security.get_current_user returned at
+    # write time (a real account's email, or "ciso"/"cfo" for the two
+    # demo accounts). Always None for data_source="predefined" rows - the
+    # shared demo fleet is intentionally common to every account, not
+    # owned by any one of them. Every "own"-scoped read in risk_engine.py/
+    # main.py now filters by this in addition to data_source, so one
+    # account's ingested environment, simulations, and ledger never show
+    # up for a different account that also happens to be using "Enter
+    # your own data".
+    owner_email: Optional[str] = Field(default=None, index=True)
+
+    # [Version the risk model fix] Every simulation result now carries
+    # its own reproducibility record - previously a run's ALE/VaR were
+    # persisted with no way to tell which model/control-catalog version
+    # produced them, whether the random draw could be replayed, or how
+    # fresh the telemetry behind it was, short of re-deriving everything
+    # by hand. model_version/control_library_version mirror
+    # risk_engine.MODEL_VERSION/CONTROL_LIBRARY_VERSION at run time;
+    # random_seed is the real seed quant_engine.monte_carlo.
+    # run_fair_monte_carlo drew (or was given) for this exact run -
+    # resubmitting the same FAIR inputs with this seed reproduces the
+    # same distribution bit-for-bit; confidence_level mirrors
+    # provenance['model_confidence'] (High/Medium/Low, from the
+    # Closed-Loop Calibration Engine's uncertainty_score);
+    # input_telemetry_at is the freshest TelemetryLog timestamp that fed
+    # this run (provenance['latest_telemetry_at']); provenance is the
+    # full evidence dict (asset/telemetry counts, FAIR input ranges,
+    # simulation_config) so a historical run can still answer "where did
+    # this number come from" long after live telemetry has moved on.
+    # All nullable/optional so existing rows from before this column
+    # existed keep resolving.
+    model_version: Optional[str] = None
+    control_library_version: Optional[str] = None
+    random_seed: Optional[int] = None
+    confidence_level: Optional[str] = None
+    input_telemetry_at: Optional[datetime] = None
+    provenance: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
 class RiskDecision(SQLModel, table=True):
     """Audit record behind /api/audit."""
@@ -178,7 +241,19 @@ class RiskDecision(SQLModel, table=True):
     # with no way to tell which was which. Defaults to 'predefined' so
     # existing rows from before this column existed still resolve
     # somewhere sensible. See main.py's /api/audit and /api/audit-log.
-    data_source: str = Field(default="predefined")
+    data_source: str = Field(default="predefined", index=True)
+
+    # [Cross-user data isolation] Which account's "own" data this row
+    # belongs to - whatever backend.security.get_current_user returned at
+    # write time (a real account's email, or "ciso"/"cfo" for the two
+    # demo accounts). Always None for data_source="predefined" rows - the
+    # shared demo fleet is intentionally common to every account, not
+    # owned by any one of them. Every "own"-scoped read in risk_engine.py/
+    # main.py now filters by this in addition to data_source, so one
+    # account's ingested environment, simulations, and ledger never show
+    # up for a different account that also happens to be using "Enter
+    # your own data".
+    owner_email: Optional[str] = Field(default=None, index=True)
 
     # [Risk Decision Passport] Everything a board member would need to
     # answer "what exactly did we know when we accepted this risk, and
@@ -195,6 +270,14 @@ class RiskDecision(SQLModel, table=True):
     reason: Optional[str] = None                   # free text - why the unfunded control was left unfunded, if given
     evidence_hash: Optional[str] = None            # SHA-256 of the real FAIR inputs/provenance dict, computed server-side
     review_expiry: Optional[datetime] = None        # created_at + 90 days - when this acceptance should be re-reviewed
+    # [Version the risk model fix] Which risk_engine.MODEL_VERSION /
+    # CONTROL_LIBRARY_VERSION were live when this decision was logged -
+    # model_snapshot above already names the backend app build, but
+    # that's a different axis (API/deploy version, not FAIR-model or
+    # control-catalog version). Both null on legacy rows predating this
+    # column, same as every other field added here.
+    model_version: Optional[str] = None
+    control_library_version: Optional[str] = None
 
 class IngestedMapping(SQLModel, table=True):
     """
@@ -223,7 +306,19 @@ class IngestedMapping(SQLModel, table=True):
     # assumed) so derive_fair_inputs' gap_deduction can filter by it the
     # same way as Asset/TelemetryLog, instead of applying every confirmed
     # gap to BOTH dashboards' Control Strength the way it used to.
-    data_source: str = Field(default="own")
+    data_source: str = Field(default="own", index=True)
+
+    # [Cross-user data isolation] Which account's "own" data this row
+    # belongs to - whatever backend.security.get_current_user returned at
+    # write time (a real account's email, or "ciso"/"cfo" for the two
+    # demo accounts). Always None for data_source="predefined" rows - the
+    # shared demo fleet is intentionally common to every account, not
+    # owned by any one of them. Every "own"-scoped read in risk_engine.py/
+    # main.py now filters by this in addition to data_source, so one
+    # account's ingested environment, simulations, and ledger never show
+    # up for a different account that also happens to be using "Enter
+    # your own data".
+    owner_email: Optional[str] = Field(default=None, index=True)
 
 class IncidentRecord(SQLModel, table=True):
     """
@@ -318,6 +413,28 @@ class User(SQLModel, table=True):
     hashed_password: str
     name: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatFeedback(SQLModel, table=True):
+    """
+    [Success metrics #15 - AI answer usefulness] One thumbs-up/down rating
+    on a single Virtual CISO answer (see VirtualCisoChat.tsx and
+    POST /api/chat/feedback). Chat messages themselves are otherwise never
+    persisted server-side (see docs/PRIVACY.md) - this is the one
+    deliberate exception, and only for the specific Q&A pair a visitor
+    chose to rate, never a whole conversation, and only when they
+    explicitly click a rating control (never captured silently). Question/
+    answer text is capped well below anything a real exchange would hit,
+    both to bound storage and because the rating itself - not a transcript
+    archive - is the point.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    rated_by: str  # from the verified JWT, never the request body
+    rating: str  # "up" | "down"
+    question: str = Field(max_length=2000)
+    answer: str = Field(max_length=4000)
+    was_offline_fallback: bool = False  # mirrors the '[Offline Mode]' marker - see ai-agent/graph.py
 
 
 # Compatibility alias

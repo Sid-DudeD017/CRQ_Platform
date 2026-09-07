@@ -148,7 +148,7 @@ export default function CommandPalette() {
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center gap-2 px-4 py-3 border-b border-outline-variant">
-                    <span className="material-symbols-outlined text-on-surface-variant text-[20px]">search</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-on-surface-variant text-[20px]">search</span>
                     <input
                         ref={inputRef}
                         value={query}
@@ -190,10 +190,10 @@ export default function CommandPalette() {
                                             onClick={() => runItem(it)}
                                             className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${isActive ? 'bg-secondary-container text-on-secondary-container' : 'text-on-surface hover:bg-surface-container-high'}`}
                                         >
-                                            <span className="material-symbols-outlined text-[18px]">{it.icon}</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{it.icon}</span>
                                             <span className="font-body-sm text-body-sm flex-1">{it.label}</span>
                                             {it.id.startsWith('login-') && loggingInRole === it.id.replace('login-', '') && (
-                                                <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+                                                <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
                                             )}
                                         </button>
                                     );

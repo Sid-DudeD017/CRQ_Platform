@@ -119,8 +119,9 @@ const BUSINESS_UNITS = [
     'Corporate IT', 'Cloud Infrastructure', 'HR & Payroll',
 ];
 
-const inputCls = 'w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary';
-const labelCls = 'font-body-sm text-body-sm font-semibold mb-1 block';
+const inputCls = 'w-full bg-surface border border-outline-variant rounded-lg px-3.5 py-2.5 text-body-sm shadow-sm transition-all duration-150 placeholder:text-on-surface-variant/50 hover:border-outline focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10';
+const selectCls = `${inputCls} appearance-none pr-9 cursor-pointer`;
+const labelCls = 'font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wide mb-1.5 block';
 
 function money(v: number | null | undefined): string {
     if (v === null || v === undefined) return '—';
@@ -267,7 +268,7 @@ export default function CalibrationPage() {
         <div className="max-w-[1100px] mx-auto flex flex-col gap-stack-lg">
             <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
                 <div>
-                    <h1 className="font-headline-md text-headline-md text-primary mb-1">Calibration</h1>
+                    <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-1">Calibration</h1>
                     <p className="font-body-md text-body-md text-on-surface-variant">
                         Closed-loop prediction-vs-actual-loss engine. Log what an incident really cost, and every control-effectiveness score, loss multiplier, and confidence interval on this platform updates from it.
                     </p>
@@ -277,13 +278,13 @@ export default function CalibrationPage() {
                     disabled={isLoadingAny}
                     className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 disabled:opacity-60 whitespace-nowrap"
                 >
-                    <span className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
+                    <span aria-hidden="true" className={`material-symbols-outlined text-[18px] ${isLoadingAny ? 'animate-spin' : ''}`}>refresh</span>
                     Refresh
                 </button>
             </div>
 
             {/* Model Uncertainty Overview */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                 <h3 className="font-title-lg text-title-lg text-primary mb-1">Model Uncertainty</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                     Falls as more incident evidence accumulates, and stays elevated if that evidence has been inconsistent - see risk_engine.compute_calibration. This score now annotates the ALE and VaR figures on Overview.
@@ -338,90 +339,134 @@ export default function CalibrationPage() {
             </div>
 
             {/* Log an Incident */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                 <h3 className="font-title-lg text-title-lg text-primary mb-1">Log an Incident</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                     Record what actually happened - downtime, recovery, legal, and penalty costs - after a real incident or near-miss. The model snapshots its most recent ALE prediction at logging time, computes the prediction error, and recalibrates.
                 </p>
-                <form onSubmit={submitIncident} className="grid grid-cols-1 md:grid-cols-3 gap-stack-md">
-                    <div>
-                        <label className={labelCls} htmlFor="inc-date">Incident Date</label>
-                        <input id="inc-date" type="date" className={inputCls} value={form.incident_date}
-                            onChange={(e) => updateField('incident_date', e.target.value)} />
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-bu">Business Unit</label>
-                        <select id="inc-bu" className={inputCls} value={form.business_unit}
-                            onChange={(e) => updateField('business_unit', e.target.value)}>
-                            <option value="">— Unspecified —</option>
-                            {BUSINESS_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-vc">Vulnerability Class</label>
-                        <select id="inc-vc" className={inputCls} value={form.vulnerability_class}
-                            onChange={(e) => updateField('vulnerability_class', e.target.value)}>
-                            {VULN_CLASSES.map((vc) => <option key={vc} value={vc}>{VULN_CLASS_LABELS[vc]}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-control">Control Involved</label>
-                        <select id="inc-control" className={inputCls} value={form.control_involved}
-                            onChange={(e) => updateField('control_involved', e.target.value)}>
-                            <option value="">— None / not control-specific —</option>
-                            {CONTROL_IDS.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-containment">Containment %</label>
-                        <input id="inc-containment" type="number" min={0} max={100} step={1} className={inputCls}
-                            placeholder="0-100" value={form.containment_pct}
-                            onChange={(e) => updateField('containment_pct', e.target.value)} />
-                    </div>
-                    <div className="flex items-end pb-2">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={form.was_contained} className="peer sr-only"
-                                onChange={(e) => updateField('was_contained', e.target.checked)} />
-                            <div className="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-sm peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-sm after:h-4 after:w-4 after:transition-all after:duration-200 peer-checked:bg-primary relative"></div>
-                            <span className="font-body-sm text-body-sm font-semibold">Fully contained</span>
-                        </label>
-                    </div>
-
-                    <div>
-                        <label className={labelCls} htmlFor="inc-downtime">Downtime Cost (₹)</label>
-                        <input id="inc-downtime" type="number" min={0} step={1} className={inputCls}
-                            placeholder="0" value={form.downtime_cost}
-                            onChange={(e) => updateField('downtime_cost', e.target.value)} />
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-recovery">Recovery Cost (₹)</label>
-                        <input id="inc-recovery" type="number" min={0} step={1} className={inputCls}
-                            placeholder="0" value={form.recovery_cost}
-                            onChange={(e) => updateField('recovery_cost', e.target.value)} />
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-legal">Legal Cost (₹)</label>
-                        <input id="inc-legal" type="number" min={0} step={1} className={inputCls}
-                            placeholder="0" value={form.legal_cost}
-                            onChange={(e) => updateField('legal_cost', e.target.value)} />
-                    </div>
-                    <div>
-                        <label className={labelCls} htmlFor="inc-penalty">Penalty Cost (₹)</label>
-                        <input id="inc-penalty" type="number" min={0} step={1} className={inputCls}
-                            placeholder="0" value={form.penalty_cost}
-                            onChange={(e) => updateField('penalty_cost', e.target.value)} />
-                    </div>
-                    <div className="md:col-span-2">
-                        <label className={labelCls} htmlFor="inc-notes">Notes</label>
-                        <input id="inc-notes" type="text" className={inputCls}
-                            placeholder="Optional context for the audit trail" value={form.notes}
-                            onChange={(e) => updateField('notes', e.target.value)} />
+                <form onSubmit={submitIncident} className="flex flex-col gap-stack-lg">
+                    <div className="bg-surface-container-low/50 border border-outline-variant/70 rounded-lg p-stack-md">
+                        <h4 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wide mb-stack-sm flex items-center gap-1.5">
+                            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">event_note</span>
+                            Incident Details
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-stack-md">
+                            <div>
+                                <label className={labelCls} htmlFor="inc-date">Incident Date</label>
+                                <input id="inc-date" type="date" className={inputCls} value={form.incident_date}
+                                    onChange={(e) => updateField('incident_date', e.target.value)} />
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-bu">Business Unit</label>
+                                <div className="relative">
+                                    <select id="inc-bu" className={selectCls} value={form.business_unit}
+                                        onChange={(e) => updateField('business_unit', e.target.value)}>
+                                        <option value="">— Unspecified —</option>
+                                        {BUSINESS_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-vc">Vulnerability Class</label>
+                                <div className="relative">
+                                    <select id="inc-vc" className={selectCls} value={form.vulnerability_class}
+                                        onChange={(e) => updateField('vulnerability_class', e.target.value)}>
+                                        {VULN_CLASSES.map((vc) => <option key={vc} value={vc}>{VULN_CLASS_LABELS[vc]}</option>)}
+                                    </select>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-control">Control Involved</label>
+                                <div className="relative">
+                                    <select id="inc-control" className={selectCls} value={form.control_involved}
+                                        onChange={(e) => updateField('control_involved', e.target.value)}>
+                                        <option value="">— None / not control-specific —</option>
+                                        {CONTROL_IDS.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="md:col-span-3 flex items-center justify-between gap-stack-sm mt-1">
+                    <div className="bg-surface-container-low/50 border border-outline-variant/70 rounded-lg p-stack-md">
+                        <h4 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wide mb-stack-sm flex items-center gap-1.5">
+                            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">shield</span>
+                            Containment
+                        </h4>
+                        <div className="flex flex-wrap items-end gap-stack-lg">
+                            <div className="w-full sm:w-52">
+                                <label className={labelCls} htmlFor="inc-containment">Containment %</label>
+                                <input id="inc-containment" type="number" min={0} max={100} step={1} className={`${inputCls} no-spinner`}
+                                    placeholder="0-100" value={form.containment_pct}
+                                    onChange={(e) => updateField('containment_pct', e.target.value)} />
+                            </div>
+                            <label className="inline-flex items-center gap-2.5 cursor-pointer pb-2.5">
+                                <input type="checkbox" checked={form.was_contained} className="peer sr-only"
+                                    onChange={(e) => updateField('was_contained', e.target.checked)} />
+                                <div className="w-11 h-6 bg-surface-variant peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/15 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-surface-variant after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all after:duration-200 peer-checked:bg-primary relative transition-colors duration-200"></div>
+                                <span className="font-body-sm text-body-sm font-medium">Fully contained</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="bg-surface-container-low/50 border border-outline-variant/70 rounded-lg p-stack-md">
+                        <h4 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wide mb-stack-sm flex items-center gap-1.5">
+                            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">payments</span>
+                            Financial Impact
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-stack-md">
+                            <div>
+                                <label className={labelCls} htmlFor="inc-downtime">Downtime Cost</label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-data-mono text-data-mono text-on-surface-variant pointer-events-none">₹</span>
+                                    <input id="inc-downtime" type="number" min={0} step={1} className={`${inputCls} no-spinner pl-8`}
+                                        placeholder="0" value={form.downtime_cost}
+                                        onChange={(e) => updateField('downtime_cost', e.target.value)} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-recovery">Recovery Cost</label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-data-mono text-data-mono text-on-surface-variant pointer-events-none">₹</span>
+                                    <input id="inc-recovery" type="number" min={0} step={1} className={`${inputCls} no-spinner pl-8`}
+                                        placeholder="0" value={form.recovery_cost}
+                                        onChange={(e) => updateField('recovery_cost', e.target.value)} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-legal">Legal Cost</label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-data-mono text-data-mono text-on-surface-variant pointer-events-none">₹</span>
+                                    <input id="inc-legal" type="number" min={0} step={1} className={`${inputCls} no-spinner pl-8`}
+                                        placeholder="0" value={form.legal_cost}
+                                        onChange={(e) => updateField('legal_cost', e.target.value)} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className={labelCls} htmlFor="inc-penalty">Penalty Cost</label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-data-mono text-data-mono text-on-surface-variant pointer-events-none">₹</span>
+                                    <input id="inc-penalty" type="number" min={0} step={1} className={`${inputCls} no-spinner pl-8`}
+                                        placeholder="0" value={form.penalty_cost}
+                                        onChange={(e) => updateField('penalty_cost', e.target.value)} />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-stack-md">
+                            <label className={labelCls} htmlFor="inc-notes">Notes</label>
+                            <input id="inc-notes" type="text" className={inputCls}
+                                placeholder="Optional context for the audit trail" value={form.notes}
+                                onChange={(e) => updateField('notes', e.target.value)} />
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-stack-md pt-stack-sm border-t border-outline-variant">
                         <div className="font-body-sm text-body-sm text-on-surface-variant">
                             Total actual loss:{' '}
-                            <span className="font-data-mono font-semibold text-on-surface">
+                            <span className="font-data-mono font-bold text-on-surface">
                                 {money(
                                     (Number(form.downtime_cost) || 0) +
                                     (Number(form.recovery_cost) || 0) +
@@ -431,8 +476,8 @@ export default function CalibrationPage() {
                             </span>
                         </div>
                         <button type="submit" disabled={isSubmitting}
-                            className="bg-primary text-on-primary font-body-sm text-body-sm px-5 py-2.5 rounded font-semibold hover:bg-opacity-90 active:scale-95 transition-all disabled:opacity-60 flex items-center gap-2">
-                            {isSubmitting && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
+                            className="bg-primary text-on-primary font-body-sm text-body-sm px-6 py-3 rounded-lg font-semibold shadow-sm hover:shadow-md hover:bg-opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center gap-2 w-full sm:w-auto justify-center">
+                            {isSubmitting && <span aria-hidden="true" className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
                             {isSubmitting ? 'Logging...' : 'Log Incident & Recalibrate'}
                         </button>
                     </div>
@@ -440,7 +485,7 @@ export default function CalibrationPage() {
             </div>
 
             {/* Control Effectiveness Matrix */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                 <h3 className="font-title-lg text-title-lg text-primary mb-1">Control Effectiveness Matrix</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                     Beta-Bernoulli posterior for each control&apos;s real-world effectiveness, updated from logged containment_pct observations against it - the &quot;EDR contained 60%, not 85% as assumed&quot; calibration in action.
@@ -502,7 +547,7 @@ export default function CalibrationPage() {
 
             {/* Vulnerability-Class & Business-Unit Multipliers */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-gutter">
-                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                     <h3 className="font-title-lg text-title-lg text-primary mb-1">Vulnerability-Class Multipliers</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                         Exploitation-likelihood multiplier per class, derived from realized prediction error on incidents of that class. 1.00x = no adjustment yet.
@@ -536,7 +581,7 @@ export default function CalibrationPage() {
                     ) : null}
                 </div>
 
-                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                     <h3 className="font-title-lg text-title-lg text-primary mb-1">Business-Unit Criticality Weights</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                         Reweights each unit&apos;s ALE share when its realized incident-loss share has outrun (or undershot) its static asset-value share. 1.00x = no adjustment yet.
@@ -567,7 +612,7 @@ export default function CalibrationPage() {
             </div>
 
             {/* Uncertainty Trend */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                 <h3 className="font-title-lg text-title-lg text-primary mb-1">Uncertainty Trend</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                     Model uncertainty score after each logged incident, oldest to newest - should trend down as evidence accumulates, and stay flatter when that evidence is consistent.
@@ -595,7 +640,7 @@ export default function CalibrationPage() {
             </div>
 
             {/* Incident Log */}
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter elevate">
                 <h3 className="font-title-lg text-title-lg text-primary mb-1">Incident Log</h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
                     Every logged incident, most recent first, with the predicted ALE snapshot at the time and the resulting prediction error.

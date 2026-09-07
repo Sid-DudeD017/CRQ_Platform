@@ -271,11 +271,28 @@ input[type="range"]:hover::-moz-range-thumb { transform: scale(1.12); }
   background-color: var(--outline);
 }
 
-/* Visible, on-brand focus state for keyboard navigation */
-a:focus-visible, button:focus-visible, input:focus-visible {
+/* Visible, on-brand focus state for keyboard navigation - includes
+   [role="button"] so custom interactive regions (e.g. the Ingestion
+   Engine's drag-drop zone) get the same visible ring as real buttons
+   when reached by keyboard, not just mouse hover/drag. */
+a:focus-visible, button:focus-visible, input:focus-visible, [role="button"]:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Hide native number-input spinner arrows - used on Calibration's cost and
+   containment fields, which read cleaner and more intentional (a
+   professional financial-entry look) without the default browser
+   up/down stepper, and without the accidental-scroll-changes-the-value
+   behavior that stepper invites. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner[type="number"] {
+  -moz-appearance: textfield;
 }
 
 /* Ambient hero glow - soft radial color blooms behind a page header.

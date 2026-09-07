@@ -15,7 +15,7 @@ for the same live telemetry.
 """
 from typing import Any, Dict, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlmodel import Session, select
 
 from . import generators, models
@@ -64,6 +64,25 @@ from . import generators, models
 # greedy orderings diverge in practice - see
 # quant_opt.optimize_budget_kev_first and backend/main.py::simulate_risk's
 # three-way optimizer_benchmark (optimal / severity_first / kev_first).
+# [Version the risk model fix] Every simulation/decision result now
+# records exactly which version of the risk MODEL (the FAIR/Monte
+# Carlo math + SEBI CCI mapping in this module and quant-engine/
+# monte_carlo.py) and which version of the CONTROL LIBRARY
+# (SECURITY_CONTROLS below - its costs, risk_reduction, severity and
+# kev_relevance figures) produced it. Bump MODEL_VERSION whenever the
+# FAIR math, calibration logic, or SEBI CCI formulas change in a way
+# that would move ALE/VaR for the exact same inputs; bump
+# CONTROL_LIBRARY_VERSION whenever SECURITY_CONTROLS' entries change
+# (a new control, a re-costed one, a re-scored severity/kev_relevance)
+# in a way that would move the optimizer's recommendation for the same
+# budget. Both are plain strings (not derived/hashed) so they read
+# clearly in a Decision Passport or simulation record - if someone
+# later challenges a risk number, these two values plus the persisted
+# random_seed (see monte_carlo.run_fair_monte_carlo) are what let that
+# exact run be reproduced and re-checked.
+MODEL_VERSION = "CRQ-FAIR-v1.2"
+CONTROL_LIBRARY_VERSION = "controls-v1"
+
 SECURITY_CONTROLS = [
     {"id": "Enforce Cloud MFA", "cost": 400000, "risk_reduction": 1400000, "severity": 7.5, "kev_relevance": 6.0},
     {"id": "Patch Payment Gateway", "cost": 1000000, "risk_reduction": 1800000, "severity": 9.8, "kev_relevance": 9.5},
@@ -430,6 +449,7 @@ def derive_fair_inputs(
     active_controls: Optional[Dict[str, bool]] = None,
     calibration: Optional[Dict[str, Any]] = None,
     data_source: str = "predefined",
+    owner_email: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Reads live assets/telemetry/topology and derives the FAIR Monte Carlo
@@ -491,10 +511,21 @@ def derive_fair_inputs(
     genuine organizational facts, not per-dashboard what-ifs.
     """
     if data_source == "own":
-        generators.ensure_own_data_baseline(db)
-        asset_scope = models.Asset.data_source == "own"
-        log_scope = models.TelemetryLog.data_source == "own"
-        mapping_scope = models.IngestedMapping.data_source == "own"
+        # [Cross-user data isolation] owner_email scopes this to just this
+        # account's fleet - see generators.ensure_own_data_baseline and
+        # Asset.owner_email's comment for why this used to leak one
+        # account's "own" data into every other account's Own Data
+        # dashboard.
+        if owner_email:
+            generators.ensure_own_data_baseline(db, owner_email)
+            asset_scope = and_(models.Asset.data_source == "own", models.Asset.owner_email == owner_email)
+            log_scope = and_(models.TelemetryLog.data_source == "own", models.TelemetryLog.owner_email == owner_email)
+            mapping_scope = and_(models.IngestedMapping.data_source == "own", models.IngestedMapping.owner_email == owner_email)
+        else:
+            # No authenticated owner given (a caller that hasn't been
+            # updated yet) - fail closed to "no own data" rather than
+            # falling back to the old unscoped-global-pool behavior.
+            return None
     else:
         asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
         log_scope = or_(models.TelemetryLog.data_source == "predefined", models.TelemetryLog.data_source.is_(None))
@@ -860,6 +891,8 @@ def derive_fair_inputs(
             _widest_key, _widest_ratio = _label, _ratio
 
     provenance = {
+        "model_version": MODEL_VERSION,
+        "control_library_version": CONTROL_LIBRARY_VERSION,
         "data_source": data_source,
         "asset_count": len(assets),
         "telemetry_log_count": len(latest_logs),
@@ -893,6 +926,7 @@ def compute_scenario_breakdown(
     mean_expected_loss: float,
     var_95: float,
     data_source: str = "predefined",
+    owner_email: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Splits this run's simulated ALE/VaR across three named attack scenarios
@@ -915,8 +949,14 @@ def compute_scenario_breakdown(
       an attacker could reach and remove sensitive data.
     """
     if data_source == "own":
+        # [Cross-user data isolation] see derive_fair_inputs' identical
+        # comment - without owner_email this scope would still match
+        # every account's "own" assets, not just this one's.
         asset_scope = models.Asset.data_source == "own"
         log_scope = models.TelemetryLog.data_source == "own"
+        if owner_email:
+            asset_scope = and_(asset_scope, models.Asset.owner_email == owner_email)
+            log_scope = and_(log_scope, models.TelemetryLog.owner_email == owner_email)
     else:
         asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
         log_scope = or_(models.TelemetryLog.data_source == "predefined", models.TelemetryLog.data_source.is_(None))
@@ -1010,6 +1050,7 @@ def compute_business_unit_breakdown(
     total_ale: float,
     calibration: Optional[Dict[str, Any]] = None,
     data_source: str = "predefined",
+    owner_email: Optional[str] = None,
 ) -> list:
     """
     Allocates the simulation's total Annualized Loss Expectancy across real
@@ -1041,7 +1082,11 @@ def compute_business_unit_breakdown(
     # against the right fleet - own-data mode's business units, not
     # whatever happens to be in the shared demo pool.
     if data_source == "own":
+        # [Cross-user data isolation] see derive_fair_inputs' identical
+        # comment.
         asset_scope = models.Asset.data_source == "own"
+        if owner_email:
+            asset_scope = and_(asset_scope, models.Asset.owner_email == owner_email)
     else:
         asset_scope = or_(models.Asset.data_source == "predefined", models.Asset.data_source.is_(None))
     assets = db.exec(select(models.Asset).where(asset_scope)).all()

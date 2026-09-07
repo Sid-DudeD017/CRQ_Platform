@@ -274,7 +274,7 @@ export default function OptimizePage() {
                             title="Copy the optimizer's own budget-only suggestion as a starting point - you can still adjust it afterward"
                             className="px-3 py-1.5 border border-outline-variant text-on-surface-variant rounded font-label-caps text-label-caps font-semibold hover:bg-surface-container-low transition-colors active:scale-95 flex items-center gap-1 shrink-0"
                         >
-                            <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">auto_awesome</span>
                             See What the Optimizer Would Pick
                         </button>
                     )}
@@ -283,7 +283,7 @@ export default function OptimizePage() {
                 {isOwn && (
                     <div className={`flex items-center justify-between gap-stack-sm mb-stack-md px-3 py-2 rounded font-body-sm text-body-sm ${overBudget ? 'bg-error/10 text-error' : 'bg-surface-container-low text-on-surface-variant'}`}>
                         <span className="flex items-center gap-1.5">
-                            <span className="material-symbols-outlined text-[16px]">{overBudget ? 'warning' : 'info'}</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{overBudget ? 'warning' : 'info'}</span>
                             {selected.length} control{selected.length === 1 ? '' : 's'} selected - {formatINR(manualCost)} of your {formatINR(budgetValue)} budget
                         </span>
                         {overBudget && <span className="font-label-caps text-label-caps font-bold">Over budget</span>}
@@ -293,7 +293,7 @@ export default function OptimizePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-stack-sm">
                     {isLoading && !result && (
                         <div className="col-span-full text-center py-stack-lg">
-                            <span className="material-symbols-outlined text-[28px] text-outline animate-spin">progress_activity</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[28px] text-outline animate-spin">progress_activity</span>
                         </div>
                     )}
                     {PATCHES.map((p) => {
@@ -316,7 +316,7 @@ export default function OptimizePage() {
                                 <div className={`flex items-start justify-between gap-2 ${included ? 'pl-2' : ''}`}>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-1.5">
-                                            <span
+                                            <span aria-hidden="true"
                                                 className="material-symbols-outlined text-[14px] shrink-0"
                                                 style={{ fontVariationSettings: included ? "'FILL' 1" : "'FILL' 0" }}
                                             >
@@ -331,7 +331,7 @@ export default function OptimizePage() {
                                             <span className={`font-data-mono text-[11px] font-semibold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{rosi}% ROSI</span>
                                             {isRecommended && (
                                                 <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-[9px] flex items-center gap-0.5">
-                                                    <span className="material-symbols-outlined text-[10px]">auto_awesome</span>Recommended
+                                                    <span aria-hidden="true" className="material-symbols-outlined text-[10px]">auto_awesome</span>Recommended
                                                 </span>
                                             )}
                                         </div>
@@ -361,7 +361,7 @@ export default function OptimizePage() {
                     ] as const).map((kpi) => (
                         <div key={kpi.key} className="bg-surface border border-outline-variant rounded-xl p-gutter shadow-sm">
                             <div className="flex items-center gap-2 mb-stack-sm">
-                                <span className={`material-symbols-outlined text-[16px] ${kpi.tone}`}>{KPI_ICONS[kpi.key]}</span>
+                                <span aria-hidden="true" className={`material-symbols-outlined text-[16px] ${kpi.tone}`}>{KPI_ICONS[kpi.key]}</span>
                                 <span className="font-label-caps text-label-caps text-on-surface-variant uppercase">{kpi.label}</span>
                             </div>
                             <div className={`font-data-mono text-[28px] leading-[34px] font-bold tracking-tight tabular-nums ${kpi.tone}`}>
@@ -513,7 +513,7 @@ export default function OptimizePage() {
                                     className={col.highlight ? 'border border-primary/40 bg-primary/5 rounded-xl p-stack-md' : 'border border-outline-variant rounded-xl p-stack-md'}
                                 >
                                     <div className="flex items-center gap-1.5 mb-1">
-                                        <span className={`material-symbols-outlined text-[16px] ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.icon}</span>
+                                        <span aria-hidden="true" className={`material-symbols-outlined text-[16px] ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.icon}</span>
                                         <span className={`font-label-caps text-label-caps ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.label}</span>
                                     </div>
                                     <div className={`font-data-mono text-[22px] font-bold ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(col.data.total_risk_reduced)}</div>
@@ -522,7 +522,7 @@ export default function OptimizePage() {
                                         <ul className="mt-stack-sm space-y-0.5">
                                             {col.data.selected_patches.map((id: string) => (
                                                 <li key={id} className="font-body-sm text-body-sm text-primary flex items-center gap-1">
-                                                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                                                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">check_circle</span>
                                                     {id}
                                                 </li>
                                             ))}
@@ -558,7 +558,7 @@ export default function OptimizePage() {
                         disabled={(isOwn ? selected.length === 0 : !optimization) || isApproving}
                         className="landing-cta-gradient py-2 px-4 rounded-lg font-body-md text-body-md font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
                     >
-                        <span className="material-symbols-outlined text-sm">lock</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-sm">lock</span>
                         {isApproving ? 'Logging...' : 'Approve & Log to Ledger'}
                     </button>
                 </div>

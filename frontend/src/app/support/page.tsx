@@ -30,35 +30,22 @@ export default function SupportPage() {
                 </ol>
             </div>
 
-            {/* Demo Credentials */}
+            {/* Demo Access */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
-                <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Demo Credentials</h3>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">
-                    Used by the &quot;Login as...&quot; buttons in the top navigation. Fixed demo accounts only - see backend/security.py.
+                <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Demo Access</h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">
+                    {/* [Public demo credentials exposed - fix] This used to print
+                        both demo accounts' real passwords here, in plain text, on a
+                        page anyone could open, plus a pointer at the backend source
+                        file that defines them - together with those same passwords
+                        being hardcoded in the shipped frontend bundle, that meant
+                        the "secret" was never actually secret. Neither is true
+                        anymore: the one-click buttons authenticate through a
+                        dedicated endpoint that never sends or stores a password at
+                        all (see backend/main.py's POST /api/auth/demo-login), so
+                        there's nothing left to print here. */}
+                    Click &quot;Login as CISO&quot; or &quot;Login as CFO&quot; in the top navigation - no password needed. If demo access has been disabled on this deployment, those buttons will say so.
                 </p>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-outline-variant">
-                                <th className="py-2 pr-4 font-label-caps text-label-caps text-on-surface-variant">Role</th>
-                                <th className="py-2 pr-4 font-label-caps text-label-caps text-on-surface-variant">Username</th>
-                                <th className="py-2 font-label-caps text-label-caps text-on-surface-variant">Password</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr className="border-b border-outline-variant">
-                                <td className="py-2 pr-4 font-body-sm text-body-sm">CISO</td>
-                                <td className="py-2 pr-4 font-data-mono text-data-mono">ciso</td>
-                                <td className="py-2 font-data-mono text-data-mono">demo-ciso-pass</td>
-                            </tr>
-                            <tr>
-                                <td className="py-2 pr-4 font-body-sm text-body-sm">CFO</td>
-                                <td className="py-2 pr-4 font-data-mono text-data-mono">cfo</td>
-                                <td className="py-2 font-data-mono text-data-mono">demo-cfo-pass</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
             </div>
 
             {/* Troubleshooting */}
@@ -72,7 +59,7 @@ export default function SupportPage() {
                         { issue: 'Accept Risk works but nothing shows on-chain', fix: 'The blockchain audit trail needs a local Hardhat node running (npx hardhat node in /blockchain) with the contract deployed (npx hardhat run scripts/deploy.js --network localhost). Without it, the decision still saves to the database, just not on-chain.' },
                     ].map((row, i) => (
                         <div key={i} className="flex gap-stack-sm items-start">
-                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">help_outline</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">help_outline</span>
                             <div>
                                 <div className="font-body-sm text-body-sm font-semibold">{row.issue}</div>
                                 <div className="font-body-sm text-body-sm text-on-surface-variant">{row.fix}</div>

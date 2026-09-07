@@ -74,7 +74,7 @@ def security_analyst_node(state: AgentState, config: RunnableConfig):
     if security_agent:
         result = security_agent.invoke({"messages": state["messages"]}, config=config)
         return {"messages": [AIMessage(content=f"[Security Analyst] {result['messages'][-1].content}")], "next_agent": "supervisor"}
-    return {"messages": [AIMessage(content="[Security Analyst] LLM not configured.")], "next_agent": "supervisor"}
+    return {"messages": [AIMessage(content="[Offline Mode] [Security Analyst] No LLM API key is configured, so this is a limited, non-AI response.")], "next_agent": "supervisor"}
 
 def compliance_officer_node(state: AgentState, config: RunnableConfig):
     # search_compliance_frameworks doesn't read data_source (compliance docs
@@ -82,8 +82,22 @@ def compliance_officer_node(state: AgentState, config: RunnableConfig):
     # for consistency and in case that ever changes.
     if compliance_agent:
         result = compliance_agent.invoke({"messages": state["messages"]}, config=config)
-        return {"messages": [AIMessage(content=f"[Compliance Officer] {result['messages'][-1].content}")], "next_agent": "supervisor"}
-    return {"messages": [AIMessage(content="[Compliance Officer] LLM not configured.")], "next_agent": "supervisor"}
+        # [AI safety fix - response validation for regulatory claims] The
+        # RAG tool (rag.py::search_compliance_frameworks) already tags
+        # every retrieved passage with a real source framework and asks
+        # the model to cite it - but even a well-cited answer is still an
+        # LLM's paraphrase of regulatory text, not a legal determination.
+        # This disclaimer is appended to every compliance answer
+        # unconditionally (cheap, always-correct) rather than trying to
+        # detect "this specific answer makes a claim" - that classification
+        # would itself be an unverified model judgment.
+        disclaimer = (
+            "\n\n_This summarizes the retrieved framework text and is not legal or "
+            "regulatory advice - verify against the current official RBI/SEBI/NIST/DPDP "
+            "text (or legal counsel) before treating it as a compliance determination._"
+        )
+        return {"messages": [AIMessage(content=f"[Compliance Officer] {result['messages'][-1].content}{disclaimer}")], "next_agent": "supervisor"}
+    return {"messages": [AIMessage(content="[Offline Mode] [Compliance Officer] No LLM API key is configured, so this is a limited, non-AI response.")], "next_agent": "supervisor"}
 
 def quant_analyst_node(state: AgentState, config: RunnableConfig):
     # Propagates data_source into run_monte_carlo_var (optimize_budget
@@ -92,7 +106,7 @@ def quant_analyst_node(state: AgentState, config: RunnableConfig):
     if quant_agent:
         result = quant_agent.invoke({"messages": state["messages"]}, config=config)
         return {"messages": [AIMessage(content=f"[Quant Analyst] {result['messages'][-1].content}")], "next_agent": "supervisor"}
-    return {"messages": [AIMessage(content="[Quant Analyst] LLM not configured.")], "next_agent": "supervisor"}
+    return {"messages": [AIMessage(content="[Offline Mode] [Quant Analyst] No LLM API key is configured, so this is a limited, non-AI response.")], "next_agent": "supervisor"}
 
 class Route(BaseModel):
     next_agent: Literal["security_analyst", "compliance_officer", "quant_analyst", "FINISH"] = Field(...)
@@ -110,10 +124,10 @@ def _general_chat_reply(last_message: str):
     if not llm:
         last_msg = last_message.lower()
         if "ledger" in last_msg or "blockchain" in last_msg:
-            return "The Zero-Trust Blockchain Ledger is currently operating in local mock mode. Please ensure your Hardhat EVM is running and connected to accept real risk transactions on-chain."
+            return "[Offline Mode] The Zero-Trust Blockchain Ledger is currently operating in local mock mode. Please ensure your Hardhat EVM is running and connected to accept real risk transactions on-chain."
         elif "redundant" in last_msg or "repeat" in last_msg or "llm" in last_msg or "key" in last_msg:
-            return "I am currently running in offline fallback mode because no LLM API key is configured. Please add an OPENAI_API_KEY or GROQ_API_KEY to ai-agent/.env for full dynamic conversations."
-        return "I am the Virtual CISO. (Offline Mode: No LLM API Key configured). I can help you query telemetry, optimize budgets, or check compliance frameworks. How can I assist you today?"
+            return "[Offline Mode] I am currently running in offline fallback mode because no LLM API key is configured. Please add an OPENAI_API_KEY or GROQ_API_KEY to ai-agent/.env for full dynamic conversations."
+        return "[Offline Mode] I am the Virtual CISO. No LLM API key is configured right now. I can still help you query telemetry, optimize budgets, or check compliance frameworks with limited, non-AI responses. How can I assist you today?"
         
     try:
         general_prompt = ChatPromptTemplate.from_messages([

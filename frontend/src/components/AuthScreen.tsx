@@ -53,15 +53,15 @@ export default function AuthScreen({
                 {onBack && (
                     <button
                         onClick={onBack}
-                        className="mb-stack-sm flex items-center gap-1 text-on-surface-variant hover:text-primary transition-colors font-body-sm text-body-sm"
+                        className="mb-stack-sm flex items-center gap-1 text-on-surface-variant hover:text-[#b45309] transition-colors font-body-sm text-body-sm"
                     >
-                        <span className="material-symbols-outlined text-[18px]">arrow_back</span> Back to home
+                        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">arrow_back</span> Back to home
                     </button>
                 )}
                 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl p-gutter animate-fade-scale-in">
                 <div className="flex items-center gap-3 mb-stack-lg">
-                    <div className="w-11 h-11 rounded-full brand-gradient text-white flex items-center justify-center shrink-0">
-                        <span className="material-symbols-outlined">{mode === 'signup' ? 'person_add' : 'shield_person'}</span>
+                    <div className="w-11 h-11 rounded-full landing-icon-badge flex items-center justify-center shrink-0">
+                        <span aria-hidden="true" className="material-symbols-outlined">{mode === 'signup' ? 'person_add' : 'shield_person'}</span>
                     </div>
                     <div>
                         <h1 className="font-title-lg text-title-lg font-bold text-primary">
@@ -82,7 +82,7 @@ export default function AuthScreen({
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 placeholder="Jane Doe"
-                                className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
+                                className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-[#f59e0b] focus:ring-2 focus:ring-[#f59e0b]/25 transition-shadow"
                             />
                         </div>
                     )}
@@ -94,7 +94,7 @@ export default function AuthScreen({
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="you@company.com"
-                            className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
+                            className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-[#f59e0b] focus:ring-2 focus:ring-[#f59e0b]/25 transition-shadow"
                         />
                     </div>
                     <div>
@@ -106,7 +106,7 @@ export default function AuthScreen({
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder={mode === 'signup' ? 'At least 6 characters' : 'Your password'}
-                            className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-primary"
+                            className="w-full bg-surface border border-outline-variant rounded px-3 py-2 text-body-sm focus:outline-none focus:border-[#f59e0b] focus:ring-2 focus:ring-[#f59e0b]/25 transition-shadow"
                         />
                     </div>
 
@@ -115,9 +115,9 @@ export default function AuthScreen({
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full brand-gradient text-white font-body-sm text-body-sm py-3 rounded font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                        className="w-full landing-cta-gradient shadow-md font-body-sm text-body-sm py-3 rounded font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2"
                     >
-                        {loading && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
+                        {loading && <span aria-hidden="true" className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
                         {loading ? (mode === 'signup' ? 'Creating account...' : 'Logging in...') : (mode === 'signup' ? 'Create account' : 'Log in')}
                     </button>
                 </form>
@@ -126,12 +126,12 @@ export default function AuthScreen({
                     {mode === 'signup' ? (
                         <>
                             Already have an account?{' '}
-                            <button type="button" onClick={() => switchMode('login')} className="text-primary font-semibold hover:underline">Log in</button>
+                            <button type="button" onClick={() => switchMode('login')} className="landing-stat-color font-semibold hover:underline">Log in</button>
                         </>
                     ) : (
                         <>
                             Don&apos;t have an account?{' '}
-                            <button type="button" onClick={() => switchMode('signup')} className="text-primary font-semibold hover:underline">Register</button>
+                            <button type="button" onClick={() => switchMode('signup')} className="landing-stat-color font-semibold hover:underline">Register</button>
                         </>
                     )}
                 </p>
@@ -142,17 +142,17 @@ export default function AuthScreen({
                         <button
                             onClick={() => loginAs('ciso')}
                             disabled={loggingInRole !== null}
-                            className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1"
+                            className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-[#f59e0b] hover:text-[#b45309] transition-colors disabled:opacity-60 flex items-center gap-1"
                         >
-                            {loggingInRole === 'ciso' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                            {loggingInRole === 'ciso' && <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
                             Demo CISO
                         </button>
                         <button
                             onClick={() => loginAs('cfo')}
                             disabled={loggingInRole !== null}
-                            className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-primary transition-colors disabled:opacity-60 flex items-center gap-1"
+                            className="px-3 py-1.5 border border-outline-variant rounded font-label-caps text-label-caps hover:border-[#f59e0b] hover:text-[#b45309] transition-colors disabled:opacity-60 flex items-center gap-1"
                         >
-                            {loggingInRole === 'cfo' && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+                            {loggingInRole === 'cfo' && <span aria-hidden="true" className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
                             Demo CFO
                         </button>
                     </div>

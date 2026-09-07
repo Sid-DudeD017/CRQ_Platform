@@ -2,6 +2,18 @@
 # New -> Blueprint -> connect this repo -> Render reads this file and
 # pre-fills everything below except the secrets marked sync: false,
 # which you paste in yourself after the service is created.
+# [Product improvement #12 - staging environment] Two independent
+# services, never one service reused with swapped env vars: each gets its
+# own database, its own Groq key, its own auto-generated SECRET_KEY, and
+# (paired with its own Vercel preview deployment - Vercel already builds
+# one automatically per branch/PR, no extra config needed there) its own
+# origin allowlist. The point is that reset-demo, generate-mock-data, and
+# any other destructive/seed operation can be exercised freely against
+# -staging without ever touching the real deployment's data. See
+# docs/STAGING.md for what's covered here vs. what a from-scratch staging
+# setup for this app should still add manually (a second Hardhat node
+# instance for blockchain, since that only ever runs locally today - see
+# the Deployment section of README.md).
 services:
   - type: web
     name: crq-platform-backend
@@ -12,8 +24,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.13
+      - key: ENVIRONMENT
+        value: production
       - key: DATABASE_URL
-        sync: false   # paste your Neon connection string here
+        sync: false   # paste your production Neon connection string here
       - key: GROQ_API_KEY
         sync: false   # your (rotated) Groq key
       - key: SECRET_KEY
@@ -25,3 +39,52 @@ services:
                        # default allowlist (backend/main.py's _default_origins),
                        # which already includes that exact placeholder domain -
                        # only needed if your Vercel URL differs from it.
+      # On-chain audit trail (optional - AuditLedger.sol). A hosted
+      # backend can't reach 127.0.0.1:8545, so it needs a real network
+      # instead of the local Hardhat node these three default to. Deploy
+      # once with `cd blockchain && npx hardhat run scripts/deploy.js
+      # --network sepolia` (see blockchain/.env.example + the README's
+      # Deployment section) - it prints/writes exactly these three
+      # values into backend/.env; paste that same set here. Leave all
+      # three unset and /api/status just reports the ledger "unavailable"
+      # - decisions still save to the database either way.
+      - key: WEB3_PROVIDER_URL
+        sync: false   # Sepolia RPC URL, e.g. https://ethereum-sepolia-rpc.publicnode.com
+      - key: CONTRACT_ADDRESS
+        sync: false   # AuditLedger's deployed address on that network
+      - key: DEPLOYER_PRIVATE_KEY
+        sync: false   # the SAME wallet that deployed it - testnet-only, never a funded key
+
+  - type: web
+    name: crq-platform-backend-staging
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+      - key: ENVIRONMENT
+        value: staging
+      - key: DATABASE_URL
+        sync: false   # a SEPARATE Neon project/branch - never point this at
+                       # the production connection string above
+      - key: GROQ_API_KEY
+        sync: false   # can reuse the same key (it's not a data-isolation
+                       # concern), or use a separate one to keep usage/cost
+                       # accounting apart
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        sync: false   # your staging Vercel preview URL(s)
+      # Same on-chain setup as production above - but deploy a SEPARATE
+      # AuditLedger contract for staging (run the deploy command again;
+      # a second wallet is optional, a second contract address is not),
+      # so staging's test "Accept Risk" clicks never land in the same
+      # on-chain ledger production's does.
+      - key: WEB3_PROVIDER_URL
+        sync: false
+      - key: CONTRACT_ADDRESS
+        sync: false
+      - key: DEPLOYER_PRIVATE_KEY
+        sync: false

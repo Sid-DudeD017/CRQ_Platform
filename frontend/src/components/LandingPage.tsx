@@ -13,14 +13,14 @@ export default function LandingPage({
     onSignup: () => void;
 }) {
     const capabilities = [
-        { icon: 'monitoring', title: 'FAIR Monte Carlo Engine', desc: '20,000-iteration simulation turns exposure into ₹ ALE and VaR.' },
+        { icon: 'monitoring', title: 'FAIR Monte Carlo Engine', desc: '10,000-iteration simulation turns exposure into ₹ ALE and VaR.' },
         { icon: 'auto_awesome', title: 'Virtual CISO, on call', desc: 'LangGraph AI agent answers security & compliance questions instantly.' },
         { icon: 'link', title: 'Blockchain Audit Trail', desc: 'Every risk decision is hashed and committed on-chain - tamper-evident.' },
         { icon: 'tune', title: 'Budget Optimizer', desc: '0/1 knapsack picks the exact controls that cut the most risk per rupee.' },
     ];
 
     const stats = [
-        { value: '20K+', label: 'Simulated years per run' },
+        { value: '10K+', label: 'Simulated years per run' },
         { value: '99.9%', label: 'Audit trail integrity' },
         { value: '24/7', label: 'AI compliance assistant' },
     ];
@@ -88,7 +88,7 @@ export default function LandingPage({
                         {capabilities.map((c) => (
                             <div key={c.title} className="flex items-start gap-3">
                                 <div className="w-10 h-10 rounded-lg landing-icon-badge flex items-center justify-center shrink-0">
-                                    <span className="material-symbols-outlined text-[20px]">{c.icon}</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{c.icon}</span>
                                 </div>
                                 <div>
                                     <h3 className="font-body-sm text-body-sm font-bold text-on-surface">{c.title}</h3>
@@ -125,7 +125,7 @@ export default function LandingPage({
                     {about.map((a) => (
                         <div key={a.title} className="border border-outline-variant rounded-xl p-stack-md elevate bg-surface-container-lowest">
                             <div className="w-10 h-10 rounded-full landing-icon-badge flex items-center justify-center mb-stack-sm">
-                                <span className="material-symbols-outlined text-[20px]">{a.icon}</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[20px]">{a.icon}</span>
                             </div>
                             <h3 className="font-body-sm text-body-sm font-bold text-on-surface mb-1">{a.title}</h3>
                             <p className="font-body-sm text-body-sm text-on-surface-variant">{a.desc}</p>

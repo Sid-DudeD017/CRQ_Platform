@@ -34,10 +34,10 @@ export default function TornadoChart({ data = DEFAULT_TORNADO, height = 220 }: T
         <div className="w-full flex flex-col gap-2">
             <div className="flex justify-between items-center text-[10px] text-on-surface-variant font-label-caps">
                 <span className="flex items-center gap-1 text-[#10b981]">
-                    <span className="material-symbols-outlined text-[12px]">arrow_downward</span> Downside Reduction
+                    <span aria-hidden="true" className="material-symbols-outlined text-[12px]">arrow_downward</span> Downside Reduction
                 </span>
                 <span className="flex items-center gap-1 text-[#ef4444]">
-                    Upside Exposure Increase <span className="material-symbols-outlined text-[12px]">arrow_upward</span>
+                    Upside Exposure Increase <span aria-hidden="true" className="material-symbols-outlined text-[12px]">arrow_upward</span>
                 </span>
             </div>
 

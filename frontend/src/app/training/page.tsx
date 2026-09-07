@@ -159,6 +159,13 @@ interface NavGuideStep {
     title: string;
     where: string;
     detail: string;
+    // Real screenshot of this exact spot in the live app (public/nav-guide/*.png) -
+    // not a mockup. The final "About this page" step is self-referential and has none.
+    screenshot?: string;
+    // Some screenshots (e.g. the chat widget) are naturally narrow/tall rather
+    // than wide dashboard captures - stretching those to the full card width
+    // looks distorted, so cap and center them instead of going edge-to-edge.
+    screenshotNarrow?: boolean;
 }
 
 const NAV_GUIDE_STEPS: NavGuideStep[] = [
@@ -167,60 +174,71 @@ const NAV_GUIDE_STEPS: NavGuideStep[] = [
         title: '1. Pick Demo or Your Own Data',
         where: 'Right after logging in, or anytime via "Switch Dashboard" in the top bar',
         detail: '"Run a demo analysis" drops you straight into a live simulation over realistic pre-loaded telemetry. "Enter your own data" takes you to the Ingestion Engine to upload a real device config instead. You can switch back and forth at any time - nothing you\'ve already run is lost either way.',
+        screenshot: '/nav-guide/step-01-pick-data.png',
     },
     {
         icon: 'dashboard',
         title: '2. Overview (Demo) / Ingestion Engine (Own Data)',
         where: 'The first tab in either dashboard',
         detail: 'Demo\'s Overview shows a simulation immediately. Own Data\'s Ingestion Engine has you upload a config file, then walks you through every finding it detected one at a time - confirm the ones that are real, ignore the ones that aren\'t. The Simulation Sandbox only appears once you\'ve worked through every finding.',
+        screenshot: '/nav-guide/step-02-overview.png',
     },
     {
         icon: 'monitoring',
         title: '3. The Simulation Sandbox',
         where: 'Bottom of Overview / Ingestion, once findings are reviewed',
-        detail: 'Set a remediation budget and toggle the Strategic Controls (MFA, Zero Trust, 24/7 SOC Monitoring, and more), then click "Run Simulation" for a fresh 20,000-iteration Monte Carlo run - Expected Annual Loss, Value at Risk, and a loss-distribution chart, all recomputed live.',
+        detail: 'Set a remediation budget and toggle the Strategic Controls (MFA, Zero Trust, 24/7 SOC Monitoring, and more), then click "Run Simulation" for a fresh 10,000-iteration Monte Carlo run - Expected Annual Loss, Value at Risk, and a loss-distribution chart, all recomputed live.',
+        screenshot: '/nav-guide/step-03-sandbox.png',
     },
     {
         icon: 'gavel',
         title: '4. Accept Risk or Approve a Plan',
         where: 'Directly under a simulation\'s results',
         detail: 'Once you have a result you\'re comfortable with, either accept the residual risk as-is or approve the optimizer\'s recommended patch plan. Both are logged as an auditable decision - see Ledger below.',
+        screenshot: '/nav-guide/step-04-accept-risk.png',
     },
     {
         icon: 'trending_up',
         title: '5. Investment',
         where: 'Top nav',
         detail: 'A step-by-step guide to where your remediation budget should actually go. Demo mode pre-selects the optimizer\'s picks for you; Own Data mode lets you choose controls yourself, budget-aware, with a button to see what the optimizer would have picked instead.',
+        screenshot: '/nav-guide/step-05-investment.png',
     },
     {
         icon: 'receipt_long',
         title: '6. Ledger',
         where: 'Top nav',
         detail: 'Every risk you\'ve accepted or plan you\'ve approved, with the option to commit any decision to a local blockchain for a tamper-evident audit trail. Demo and Own Data keep completely separate ledgers, with separate on-chain commits.',
+        screenshot: '/nav-guide/step-06-ledger.png',
     },
     {
         icon: 'target',
         title: '7. Calibration',
         where: 'Top nav',
         detail: 'Log what actually happened after a real (or near-miss) incident. The model compares that outcome to what it had predicted and recalibrates control-effectiveness and confidence bands for every simulation you run afterward - this is what makes the model get sharper over time instead of repeating the same static assumptions.',
+        screenshot: '/nav-guide/step-07-calibration.png',
     },
     {
         icon: 'assessment',
         title: '8. Reports',
         where: 'Top nav',
         detail: 'A board-ready snapshot: total risk accepted, audit-trail integrity, a run-over-run simulation history chart, and the Framework Coverage Matrix crosswalking your active controls to NIST CSF, ISO/IEC 27001, and CIS Controls v8. Downloadable as a self-contained report.',
+        screenshot: '/nav-guide/step-08-reports.png',
     },
     {
         icon: 'auto_awesome',
         title: '9. Virtual CISO Chat',
         where: 'Chat icon, bottom-right corner, on every dashboard page',
         detail: 'An AI assistant that can answer security and compliance questions using this session\'s actual live risk data - not a generic chatbot reciting boilerplate.',
+        screenshot: '/nav-guide/step-09-chat.png',
+        screenshotNarrow: true,
     },
     {
         icon: 'search',
         title: '10. Command Palette',
         where: 'The search bar in the top nav',
         detail: 'Jump to any page instantly instead of hunting through the nav bar - useful once you\'re moving between Overview/Ingestion, Investment, Ledger, Calibration, and Reports regularly.',
+        screenshot: '/nav-guide/step-10-command-palette.png',
     },
     {
         icon: 'model_training',
@@ -237,7 +255,7 @@ function QuickCheck({ quiz }: { quiz: QuizQuestion }) {
     return (
         <div className="bg-surface-container-low border border-outline-variant rounded-lg p-stack-md">
             <p className="font-label-caps text-label-caps text-primary mb-stack-sm flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[16px]">quiz</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">quiz</span>
                 Quick check
             </p>
             <p className="font-body-sm text-body-sm mb-stack-sm">{quiz.question}</p>
@@ -267,7 +285,7 @@ function QuickCheck({ quiz }: { quiz: QuizQuestion }) {
             </div>
             {selected !== null && (
                 <p className={`font-body-sm text-body-sm mt-stack-sm flex gap-1.5 items-start ${isCorrect ? 'text-[#15803d]' : 'text-error'}`}>
-                    <span className="material-symbols-outlined text-[16px] mt-0.5">{isCorrect ? 'check_circle' : 'info'}</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[16px] mt-0.5">{isCorrect ? 'check_circle' : 'info'}</span>
                     <span>{quiz.explanation}</span>
                 </p>
             )}
@@ -295,14 +313,14 @@ function ModuleCard({
     return (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col gap-stack-sm">
             <div className="flex gap-stack-md items-start">
-                <span className="material-symbols-outlined text-[24px] text-primary mt-0.5">{m.icon}</span>
+                <span aria-hidden="true" className="material-symbols-outlined text-[24px] text-primary mt-0.5">{m.icon}</span>
                 <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="font-body-sm text-body-sm font-semibold">{m.title}</span>
                         <span className="font-label-caps text-label-caps px-2 py-0.5 bg-secondary-container text-on-secondary-container rounded">{m.framework}</span>
                         {isCompletedByMe && (
                             <span className="font-label-caps text-label-caps px-2 py-0.5 bg-[#15803d]/15 text-[#15803d] rounded flex items-center gap-1">
-                                <span className="material-symbols-outlined text-[12px]">check_circle</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[12px]">check_circle</span>
                                 Completed by you
                             </span>
                         )}
@@ -325,9 +343,12 @@ function ModuleCard({
                     className="font-label-caps text-label-caps text-primary hover:underline flex items-center gap-1"
                 >
                     {m.guidelineLabel}
-                    <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">open_in_new</span>
                 </a>
-                <span className="font-data-mono text-data-mono text-on-surface-variant">
+                <span
+                    className="font-data-mono text-data-mono text-on-surface-variant cursor-help"
+                    title={`This demo environment has exactly ${DEMO_ACCOUNT_COUNT} named accounts (CISO and CFO). ${completedCount} of those ${DEMO_ACCOUNT_COUNT} have completed this module - it is not a percentage of your organization's real headcount.`}
+                >
                     {completedCount} / {DEMO_ACCOUNT_COUNT} accounts completed
                 </span>
                 <button
@@ -342,9 +363,9 @@ function ModuleCard({
                     }`}
                 >
                     {isToggling ? (
-                        <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
                     ) : (
-                        <span className="material-symbols-outlined text-[16px]">{isCompletedByMe ? 'undo' : 'check'}</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{isCompletedByMe ? 'undo' : 'check'}</span>
                     )}
                     {isCompletedByMe ? 'Mark incomplete' : 'Mark complete'}
                 </button>
@@ -356,19 +377,103 @@ function ModuleCard({
     );
 }
 
-function NavGuideCard({ step }: { step: NavGuideStep }) {
+// [Platform Navigation Guide carousel] Replaced the old static 2-column grid
+// of NavGuideCard - one step visible at a time, with Prev/Next arrows and a
+// dot/step-counter indicator, each step backed by a real screenshot of that
+// exact spot in the live app (public/nav-guide/*.png), not a mockup.
+function NavGuideCarousel({ steps }: { steps: NavGuideStep[] }) {
+    const [index, setIndex] = useState(0);
+    const step = steps[index];
+    const isFirst = index === 0;
+    const isLast = index === steps.length - 1;
+
+    const goPrev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
+    const goNext = useCallback(() => setIndex((i) => Math.min(steps.length - 1, i + 1)), [steps.length]);
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowLeft') goPrev();
+            if (e.key === 'ArrowRight') goNext();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [goPrev, goNext]);
+
     return (
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex flex-col gap-2">
-            <div className="flex gap-stack-md items-start">
-                <span className="w-9 h-9 rounded-full landing-icon-badge flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[18px]">{step.icon}</span>
-                </span>
-                <div className="flex-1 min-w-0">
-                    <p className="font-body-sm text-body-sm font-semibold">{step.title}</p>
-                    <p className="font-data-mono text-data-mono text-on-surface-variant mt-0.5">{step.where}</p>
+        <div className="flex flex-col gap-stack-md">
+            <div className="flex items-center justify-center gap-stack-md">
+                <button
+                    type="button"
+                    onClick={goPrev}
+                    disabled={isFirst}
+                    aria-label="Previous step"
+                    className="w-9 h-9 rounded-full border border-outline-variant flex items-center justify-center hover:border-primary hover:text-primary disabled:opacity-30 disabled:hover:border-outline-variant disabled:hover:text-current transition-colors shrink-0"
+                >
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">chevron_left</span>
+                </button>
+
+                <div className="flex flex-col items-center gap-1.5">
+                    <span className="font-label-caps text-label-caps text-on-surface-variant">
+                        Step {index + 1} of {steps.length}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                        {steps.map((s, i) => (
+                            <button
+                                key={s.title}
+                                type="button"
+                                onClick={() => setIndex(i)}
+                                aria-label={`Go to step ${i + 1}: ${s.title}`}
+                                aria-current={i === index}
+                                className={`rounded-full transition-all ${
+                                    i === index ? 'w-5 h-2 bg-primary' : 'w-2 h-2 bg-outline-variant hover:bg-primary/50'
+                                }`}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={goNext}
+                    disabled={isLast}
+                    aria-label="Next step"
+                    className="w-9 h-9 rounded-full border border-outline-variant flex items-center justify-center hover:border-primary hover:text-primary disabled:opacity-30 disabled:hover:border-outline-variant disabled:hover:text-current transition-colors shrink-0"
+                >
+                    <span aria-hidden="true" className="material-symbols-outlined text-[20px]">chevron_right</span>
+                </button>
+            </div>
+
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter w-full">
+                {/* Text first, screenshot below at full card width - the earlier
+                    side-by-side layout fought the browser over the screenshot's
+                    large intrinsic pixel width (flex items don't shrink below
+                    their content's natural size unless told to) and produced a
+                    lopsided, mostly-blank row. A plain full-width stack with an
+                    explicit gap can't have that problem: the image always fills
+                    the card, with real breathing room above it. */}
+                <div className="flex flex-col gap-stack-md">
+                    {step.screenshot && (
+                        <div
+                            className={`min-w-0 border-2 border-outline-variant rounded-lg overflow-hidden bg-surface-container ${
+                                step.screenshotNarrow ? 'w-full max-w-[360px] mx-auto' : 'w-full'
+                            }`}
+                        >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={step.screenshot} alt={`Screenshot: ${step.title}`} className="w-full h-auto block" />
+                        </div>
+                    )}
+                    <div className="flex gap-stack-md items-start">
+                        <span className="w-9 h-9 rounded-full landing-icon-badge flex items-center justify-center shrink-0">
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px]">{step.icon}</span>
+                        </span>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-title-lg text-title-lg">{step.title}</p>
+                            <p className="font-data-mono text-data-mono text-on-surface-variant mt-0.5">{step.where}</p>
+                        </div>
+                    </div>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant sm:pl-[48px]">{step.detail}</p>
                 </div>
             </div>
-            <p className="font-body-sm text-body-sm text-on-surface-variant sm:pl-[48px]">{step.detail}</p>
         </div>
     );
 }
@@ -476,7 +581,7 @@ export default function TrainingPage() {
                         activeTab === 'compliance' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-primary'
                     }`}
                 >
-                    <span className="material-symbols-outlined text-[18px]">school</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">school</span>
                     Security &amp; Compliance Training
                 </button>
                 <button
@@ -486,7 +591,7 @@ export default function TrainingPage() {
                         activeTab === 'navigation' ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-primary'
                     }`}
                 >
-                    <span className="material-symbols-outlined text-[18px]">map</span>
+                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">map</span>
                     Platform Navigation Guide
                 </button>
             </div>
@@ -526,11 +631,11 @@ export default function TrainingPage() {
                                     ? 'Loading...'
                                     : error
                                         ? error
-                                        : `${modulesCovered} of ${TRAINING_MODULES.length} required modules have at least one completion logged.`}
+                                        : `${modulesCovered} of ${TRAINING_MODULES.length} required modules have at least one completion logged (by either demo account - see the per-account counts below for which one).`}
                                 {' '}This isn&apos;t just a checklist - <code className="font-data-mono text-data-mono">derive_fair_inputs()</code> on the backend folds this coverage into a real Control Strength boost (up to +10 points at 100% coverage), so completing a module here actually moves the Expected Annual Loss on Overview, not just a badge on this page.
                             </p>
                             <div className="flex items-center gap-2 font-data-mono text-data-mono text-primary">
-                                <span className="material-symbols-outlined text-[16px]">bolt</span>
+                                <span aria-hidden="true" className="material-symbols-outlined text-[16px]">bolt</span>
                                 +{boostPts.toFixed(1)} pts to Control Strength right now
                             </div>
                         </div>
@@ -538,7 +643,7 @@ export default function TrainingPage() {
 
                     {!token && (
                         <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter flex gap-stack-sm items-center">
-                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant">lock</span>
                             <p className="font-body-sm text-body-sm text-on-surface-variant">
                                 Log in as CISO or CFO (top-right corner) to mark modules complete and count toward the coverage above.
                             </p>
@@ -547,7 +652,10 @@ export default function TrainingPage() {
 
                     {/* Coverage by module - compact bar breakdown */}
                     <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
-                        <h3 className="font-title-lg text-title-lg text-primary mb-stack-md">Coverage by module</h3>
+                        <h3 className="font-title-lg text-title-lg text-primary mb-1">Coverage by module</h3>
+                        <p className="font-body-sm text-[12px] text-on-surface-variant mb-stack-md">
+                            Demo scope: exactly {DEMO_ACCOUNT_COUNT} named accounts exist here (CISO and CFO). Each row below counts how many of those {DEMO_ACCOUNT_COUNT} have completed that module - not your organization&apos;s total headcount.
+                        </p>
                         <div className="flex flex-col gap-stack-sm">
                             {isLoading ? (
                                 [100, 60, 40, 20, 10].map((w, i) => (
@@ -567,7 +675,7 @@ export default function TrainingPage() {
                                         <div key={m.id}>
                                             <div className="flex justify-between items-end mb-1">
                                                 <span className="font-body-sm text-body-sm font-medium">{m.title}</span>
-                                                <span className="font-data-mono text-data-mono text-on-surface-variant">{count}/{DEMO_ACCOUNT_COUNT}</span>
+                                                <span className="font-data-mono text-data-mono text-on-surface-variant cursor-help" title={`${count} of the ${DEMO_ACCOUNT_COUNT} demo accounts (CISO, CFO) have completed this module.`}>{count}/{DEMO_ACCOUNT_COUNT}</span>
                                             </div>
                                             <div className="w-full bg-surface-container h-2 rounded overflow-hidden">
                                                 <div
@@ -585,7 +693,7 @@ export default function TrainingPage() {
                     {/* Why this page exists */}
                     <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                         <div className="flex gap-stack-sm items-start">
-                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
                             <p className="font-body-sm text-body-sm text-on-surface-variant">
                                 The FAIR model&apos;s Control Strength input and the SEBI Cyber Capability Index both assume a trained workforce - untrained staff show up indirectly as weaker control strength and lower Withstand/Anticipate scores on the Reports page. The modules below are what that training program actually needs to cover.
                             </p>
@@ -618,18 +726,14 @@ export default function TrainingPage() {
 
             {activeTab === 'navigation' && (
                 <div className="flex flex-col gap-stack-md">
+                    <NavGuideCarousel steps={NAV_GUIDE_STEPS} />
                     <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                         <div className="flex gap-stack-sm items-start">
-                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[18px] text-on-surface-variant mt-0.5">info</span>
                             <p className="font-body-sm text-body-sm text-on-surface-variant">
                                 A plain-language map of the platform, in the order you&apos;d actually use it. This tab is reference only - nothing here changes any number, unlike the compliance modules on the other tab.
                             </p>
                         </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-sm">
-                        {NAV_GUIDE_STEPS.map((step) => (
-                            <NavGuideCard key={step.title} step={step} />
-                        ))}
                     </div>
                 </div>
             )}

@@ -1,3 +1,4 @@
+import logging
 import sys
 import os
 from typing import Optional
@@ -34,6 +35,26 @@ def _data_source_from_config(config: Optional[RunnableConfig]) -> str:
     return (config.get("configurable") or {}).get("data_source", "predefined")
 
 
+def _owner_email_from_config(config: Optional[RunnableConfig]) -> Optional[str]:
+    """
+    Companion to _data_source_from_config - pulls the per-account owner
+    identity (the JWT `sub`/email backend/main.py's /api/chat now passes
+    in alongside data_source) out of a tool call's RunnableConfig. This is
+    what lets run_monte_carlo_var / query_telemetry read the SAME
+    per-owner "own" data risk_engine.derive_fair_inputs and the
+    /api/simulate-risk, /api/audit etc. REST endpoints now scope to,
+    instead of the single global "own" bucket every account used to share
+    (see backend/models.py's owner_email columns and
+    backend/generators.py's per-owner seeding). Returns None if missing -
+    every caller here already treats a missing/None owner_email as "stay
+    unscoped / fail closed", matching risk_engine's own defaults, so this
+    never hard-fails on an old/malformed config either.
+    """
+    if not config:
+        return None
+    return (config.get("configurable") or {}).get("owner_email")
+
+
 @tool
 def optimize_budget(budget: float) -> str:
     """
@@ -67,11 +88,13 @@ def run_monte_carlo_var(is_dpdp_applicable: Optional[bool] = None, config: Runna
     demo fleet regardless of which dashboard asked.
     """
     data_source = _data_source_from_config(config)
+    owner_email = _owner_email_from_config(config)
     db = SessionLocal()
     try:
         calibration = risk_engine.get_current_calibration(db)
         inputs = risk_engine.derive_fair_inputs(
             db, dpdp_override=is_dpdp_applicable, calibration=calibration, data_source=data_source,
+            owner_email=owner_email,
         )
     finally:
         db.close()
@@ -124,8 +147,9 @@ def query_telemetry(query: str = "", config: RunnableConfig = None) -> str:
     dashboard.
     """
     data_source = _data_source_from_config(config)
+    owner_email = _owner_email_from_config(config)
     try:
-        from sqlalchemy import or_
+        from sqlalchemy import and_, or_
         from backend.database import SessionLocal
         from backend.models import TelemetryLog, Asset
         db = SessionLocal()
@@ -134,9 +158,22 @@ def query_telemetry(query: str = "", config: RunnableConfig = None) -> str:
         # but "predefined" also has to catch legacy rows with no data_source
         # set at all, or older seeded data would silently vanish from every
         # demo-mode chat answer.
+        #
+        # [Cross-user data leakage fix] "own" additionally has to be scoped
+        # to the requesting account's owner_email - otherwise this chatbot
+        # tool would answer with (or leak the existence of) every other
+        # account's ingested telemetry, exactly the bug reported against
+        # the Own Data Ledger. If no owner_email is available (e.g. an
+        # old/direct graph invocation without going through /api/chat),
+        # fail closed to "no rows" rather than silently falling back to
+        # the old shared-global-bucket behavior.
         if data_source == "own":
-            asset_scope = Asset.data_source == "own"
-            log_scope = TelemetryLog.data_source == "own"
+            if owner_email:
+                asset_scope = and_(Asset.data_source == "own", Asset.owner_email == owner_email)
+                log_scope = and_(TelemetryLog.data_source == "own", TelemetryLog.owner_email == owner_email)
+            else:
+                asset_scope = Asset.id.is_(None)
+                log_scope = TelemetryLog.id.is_(None)
         else:
             asset_scope = or_(Asset.data_source == "predefined", Asset.data_source.is_(None))
             log_scope = or_(TelemetryLog.data_source == "predefined", TelemetryLog.data_source.is_(None))
@@ -166,9 +203,25 @@ def query_telemetry(query: str = "", config: RunnableConfig = None) -> str:
                 return f"No telemetry logs found for assets matching '{cleaned}'."
             return "No telemetry logs found for the current data set. Please run mock data generation."
 
+        # [AI safety fix - redact sensitive telemetry] Deliberately a
+        # hand-picked field list, not `vars(log)`/model_dump() - Asset
+        # carries ip_address and this account's own owner_email, neither
+        # of which has any reason to ever reach the LLM's context or a
+        # chat transcript. Keep this an explicit allowlist of fields (not
+        # an exclude-list) if this ever grows: an allowlist fails safe
+        # (a new sensitive column added to TelemetryLog/Asset is simply
+        # absent from the tool output until someone deliberately adds it
+        # here) where an exclude-list fails open.
         results = []
         for log in logs:
             results.append(f"Asset: {log.asset_id}, Vulnerability: {log.vulnerability_score}, Threat: {log.threat_level}, EDR: {log.edr_status}")
         return f"Telemetry results:\n" + "\n".join(results)
     except Exception as e:
-        return f"Error querying telemetry: {str(e)}"
+        # [API security review / AI safety - safe error messages] This
+        # used to hand str(e) straight back to the LLM, which could then
+        # repeat internal details (a DB error, a stack fragment) to the
+        # end user as if it were a normal answer. Logged server-side in
+        # full; the model gets a safe, generic result it can relay
+        # honestly without leaking anything internal.
+        logging.getLogger("crq.ai_tools").exception("query_telemetry failed")
+        return "Telemetry lookup failed due to an internal error. Try again, or ask a different question."

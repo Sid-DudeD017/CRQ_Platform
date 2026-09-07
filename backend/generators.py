@@ -207,47 +207,67 @@ def populate_database(db: Session):
         return False, str(e)
 
 
-def generate_own_data_seed():
+def _owner_slug(owner_email: str) -> str:
+    """Turns an owner identity (a real email, or 'ciso'/'cfo' for the demo
+    accounts) into a short, safe fragment for a primary-key id - letters/
+    digits only, uppercased, capped so ids stay readable
+    (e.g. 'abc5@gmail.com' -> 'ABC5-GMAIL-COM')."""
+    import re
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", owner_email).strip("-").upper()
+    return slug[:24] or "UNKNOWN"
+
+
+def generate_own_data_seed(owner_email: str):
     """
     [Own-Data / Demo isolation] A small, fixed (not randomized) starter
-    fleet for the "Enter your own data" dashboard, seeded once before any
-    config has been uploaded through the Ingestion Engine. Deliberately
-    moderate/neutral - not artificially clean, not artificially bad -
-    because what's supposed to actually move this baseline is confirmed
-    Ingestion Engine findings (see risk_engine.derive_fair_inputs'
-    gap_deduction) and Training coverage, not randomization. Kept separate
-    from generate_mock_assets' 25-asset randomized demo fleet so the two
-    dashboards start from genuinely different data instead of secretly
-    sharing one global pool.
+    fleet for the "Enter your own data" dashboard, seeded once per
+    ACCOUNT (see ensure_own_data_baseline) before any config has been
+    uploaded through the Ingestion Engine. Deliberately moderate/neutral -
+    not artificially clean, not artificially bad - because what's supposed
+    to actually move this baseline is confirmed Ingestion Engine findings
+    (see risk_engine.derive_fair_inputs' gap_deduction) and Training
+    coverage, not randomization. Kept separate from generate_mock_assets'
+    25-asset randomized demo fleet so the two dashboards start from
+    genuinely different data instead of secretly sharing one global pool.
+
+    [Cross-user data isolation] owner_email namespaces every asset id
+    (OWN-<slug>-001 etc.) so two different accounts each get their own
+    fleet with no primary-key collision, and every row is tagged with
+    owner_email so derive_fair_inputs/compute_scenario_breakdown/
+    compute_business_unit_breakdown can filter to just this account's rows.
     """
+    slug = _owner_slug(owner_email)
+    def _id(n: str) -> str:
+        return f"OWN-{slug}-{n}"
     assets = [
-        Asset(id="OWN-001", name="Core Edge Router", asset_type="Gateway",
+        Asset(id=_id("001"), name="Core Edge Router", asset_type="Gateway",
               business_unit="Cloud Infrastructure", business_value=180000.0,
               criticality_score=70, ip_address="10.20.0.1",
               data_classification="Public", business_criticality="Tier 1"),
-        Asset(id="OWN-002", name="Core Distribution Switch", asset_type="Server",
+        Asset(id=_id("002"), name="Core Distribution Switch", asset_type="Server",
               business_unit="Corporate IT", business_value=90000.0,
               criticality_score=60, ip_address="10.20.0.2",
               data_classification="Internal", business_criticality="Tier 2"),
-        Asset(id="OWN-003", name="Application Server", asset_type="Server",
+        Asset(id=_id("003"), name="Application Server", asset_type="Server",
               business_unit="Retail Operations", business_value=140000.0,
               criticality_score=65, ip_address="10.20.1.10",
               data_classification="Internal", business_criticality="Tier 2"),
-        Asset(id="OWN-004", name="Customer Database", asset_type="Database",
+        Asset(id=_id("004"), name="Customer Database", asset_type="Database",
               business_unit="Customer Data Platform", business_value=650000.0,
               criticality_score=90, ip_address="10.20.1.20",
               data_classification="PII", business_criticality="Tier 1"),
-        Asset(id="OWN-005", name="Public WAN Gateway", asset_type="Gateway",
+        Asset(id=_id("005"), name="Public WAN Gateway", asset_type="Gateway",
               business_unit="Cloud Infrastructure", business_value=160000.0,
               criticality_score=75, ip_address="203.0.113.1",
               data_classification="Public", business_criticality="Tier 1"),
-        Asset(id="OWN-006", name="Employee Endpoint Fleet", asset_type="Laptop",
+        Asset(id=_id("006"), name="Employee Endpoint Fleet", asset_type="Laptop",
               business_unit="HR & Payroll", business_value=45000.0,
               criticality_score=35, ip_address="10.20.9.0",
               data_classification="Internal", business_criticality="Tier 3"),
     ]
     for a in assets:
         a.data_source = "own"
+        a.owner_email = owner_email
 
     def _log(asset_id, vuln, mfa=True, patch="Up-to-date", cvss=0.0, exposure=False, misconfig=0):
         return TelemetryLog(
@@ -259,33 +279,46 @@ def generate_own_data_seed():
             edr_health_status="Healthy", host_compromise_flags=False, malware_alerts_24h=0,
             public_exposure_flag=exposure, cloud_misconfigurations_count=misconfig,
             cisa_kev_presence=False, threat_actor_chatter="None", data_source="own",
+            owner_email=owner_email,
         )
 
     logs = [
-        _log("OWN-001", 5.5, exposure=True),
-        _log("OWN-002", 4.5),
-        _log("OWN-003", 5.0),
-        _log("OWN-004", 5.5, mfa=True),
-        _log("OWN-005", 6.0, exposure=True, misconfig=1),
-        _log("OWN-006", 4.0),
+        _log(_id("001"), 5.5, exposure=True),
+        _log(_id("002"), 4.5),
+        _log(_id("003"), 5.0),
+        _log(_id("004"), 5.5, mfa=True),
+        _log(_id("005"), 6.0, exposure=True, misconfig=1),
+        _log(_id("006"), 4.0),
     ]
     return assets, logs
 
 
-def ensure_own_data_baseline(db: Session) -> bool:
+def ensure_own_data_baseline(db: Session, owner_email: str) -> bool:
     """
-    Lazily seeds generate_own_data_seed()'s starter fleet exactly once,
-    the first time anything asks for 'own' data (see risk_engine.
-    derive_fair_inputs). Checked by existence, never wipes or re-seeds -
-    unlike populate_database above, this must never clobber real Asset/
-    TelemetryLog state that a user's own Ingestion Engine confirmations
-    may already be influencing. Returns True if it just seeded, False if
-    'own' data already existed.
+    Lazily seeds generate_own_data_seed()'s starter fleet exactly once per
+    ACCOUNT, the first time that account asks for 'own' data (see
+    risk_engine.derive_fair_inputs). Checked by existence scoped to this
+    owner_email, never wipes or re-seeds - unlike populate_database above,
+    this must never clobber real Asset/TelemetryLog state that a user's
+    own Ingestion Engine confirmations may already be influencing. Returns
+    True if it just seeded, False if this owner's 'own' data already
+    existed.
+
+    [Cross-user data isolation] Previously this checked (and seeded)
+    "does ANY 'own' data exist at all", so the very first account to ever
+    use "Enter your own data" seeded one global fleet that every
+    subsequent account then also saw as if it were their own - the root
+    cause of one account's Own Data Ledger/Reports showing another
+    account's assets, decisions, and simulation history. Scoping the
+    existence check (and the seed itself) to owner_email gives every
+    account its own fleet instead.
     """
-    existing = db.exec(select(Asset).where(Asset.data_source == "own")).first()
+    existing = db.exec(
+        select(Asset).where(Asset.data_source == "own", Asset.owner_email == owner_email)
+    ).first()
     if existing:
         return False
-    assets, logs = generate_own_data_seed()
+    assets, logs = generate_own_data_seed(owner_email)
     db.add_all(assets)
     db.commit()
     db.add_all(logs)

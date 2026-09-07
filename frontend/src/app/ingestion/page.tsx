@@ -26,6 +26,20 @@ const SEVERITY_STYLES: Record<Finding['severity'], { badge: string; label: strin
     critical: { badge: 'bg-error/10 text-error', label: 'Critical Gap', dot: 'bg-error' },
 };
 
+// [Ingestion upload guidance fix] Accepted types/size/encoding, spelled
+// out in the UI and enforced client-side before a file is even read -
+// previously the only signal was the native picker's `accept` filter
+// (bypassable via drag-drop) and an unbounded FileReader.readAsText with
+// no size cap and no feedback on a binary/garbled upload.
+const ACCEPTED_EXTENSIONS = ['.txt', '.cfg', '.conf', '.json', '.log'];
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB - generous for a text device config
+const MAX_FILE_SIZE_LABEL = '2 MB';
+
+const SAMPLE_CONFIGS: { label: string; href: string; filename: string }[] = [
+    { label: 'Cisco IOS sample', href: '/samples/cisco-ios-sample.cfg', filename: 'cisco-ios-sample.cfg' },
+    { label: 'SONiC sample', href: '/samples/sonic-sample.cfg', filename: 'sonic-sample.cfg' },
+];
+
 export default function IngestionPage() {
     const { token, username } = useAuth();
     const { showToast } = useToast();
@@ -112,9 +126,18 @@ export default function IngestionPage() {
         setIsSimulating(true);
         try {
             const budgetValue = (budget / 100) * 10000000;
+            // [Cross-user data leakage fix] POST /api/simulate-risk with
+            // data_source: 'own' now requires a logged-in caller (see
+            // backend/main.py) so a run is attributable to, and later only
+            // readable by, the real account - previously this call had no
+            // auth at all and every "own" run landed in one shared global
+            // bucket every account could read back.
             const res = await fetchWithRetry(`${API_BASE}/api/simulate-risk`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ budget: budgetValue, active_controls: controls, data_source: 'own' }),
             });
             const data = await res.json();
@@ -144,7 +167,7 @@ export default function IngestionPage() {
         } catch (e) {
             if (requestId !== simRequestIdRef.current) return;
             console.error(e);
-            if (!opts?.silent) showToast('Error running simulation. Ensure FastAPI is running on port 8000.', 'error');
+            if (!opts?.silent) showToast('Error running simulation. Ensure FastAPI is running on port 8000.', 'error', { dataSaved: 'no', retrySafe: true });
         } finally {
             if (requestId === simRequestIdRef.current) {
                 // Same 0.5s perceived-work floor as the demo dashboard,
@@ -159,7 +182,7 @@ export default function IngestionPage() {
                 setIsSimulating(false);
             }
         }
-    }, [budget, controls, showToast, persistIngestionState]);
+    }, [budget, controls, showToast, persistIngestionState, token]);
 
     const acceptRisk = async (label: string, riskAmountRupees: number) => {
         if (!token) {
@@ -182,13 +205,13 @@ export default function IngestionPage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not log audit: ${data.detail || res.status}`, 'error');
+                showToast(`Could not log audit: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             showToast(`Risk accepted and logged to the audit trail.\nDecision #${data.decision_id} - Decided by: ${data.decided_by}`, 'success');
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setAcceptingRiskFor(null);
         }
@@ -217,28 +240,37 @@ export default function IngestionPage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not log approval: ${data.detail || res.status}`, 'error');
+                showToast(`Could not log approval: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             showToast(`Optimization plan approved and logged. Decision #${data.decision_id}.`, 'success');
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setIsApproving(false);
         }
     };
 
     const fetchTrainedCount = useCallback(async () => {
+        // [Cross-user data leakage fix] GET /api/ingest/mappings now
+        // requires a valid bearer token and is scoped to this account's
+        // own confirmed mappings (it used to have no auth at all and
+        // returned every account's mappings together). Skip the call
+        // rather than firing an unauthenticated request that would 401 -
+        // the counter just stays blank until token is available.
+        if (!token) return;
         try {
-            const res = await fetch(`${API_BASE}/api/ingest/mappings`);
+            const res = await fetch(`${API_BASE}/api/ingest/mappings`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
             if (!res.ok) return;
             const data = await res.json();
             setTrainedCount(typeof data.count === 'number' ? data.count : null);
         } catch {
             // Non-critical - the counter just stays blank if this fails.
         }
-    }, []);
+    }, [token]);
 
     useEffect(() => {
         fetchTrainedCount();
@@ -300,7 +332,7 @@ export default function IngestionPage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not parse file: ${data.detail || res.status}`, 'error');
+                showToast(`Could not parse file: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
                 return;
             }
             setFileName(name);
@@ -322,20 +354,55 @@ export default function IngestionPage() {
             }
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setIsParsing(false);
         }
     }, [showToast, runSimulation, persistIngestionState]);
 
     const handleFile = useCallback((file: File) => {
+        const lowerName = file.name.toLowerCase();
+        const hasAcceptedExtension = ACCEPTED_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+        if (!hasAcceptedExtension) {
+            showToast(`"${file.name}" isn't a recognized config type. Upload one of: ${ACCEPTED_EXTENSIONS.join(', ')}.`, 'error');
+            return;
+        }
+        if (file.size === 0) {
+            showToast(`"${file.name}" is empty - nothing to parse.`, 'error');
+            return;
+        }
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+            showToast(`"${file.name}" is ${(file.size / (1024 * 1024)).toFixed(1)} MB, over the ${MAX_FILE_SIZE_LABEL} limit. Upload a smaller config excerpt.`, 'error');
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
             const text = typeof reader.result === 'string' ? reader.result : '';
+            // readAsText silently replaces undecodable bytes with U+FFFD, so a
+            // high replacement-char ratio (or an embedded NUL byte) means this
+            // almost certainly isn't plain-text/UTF-8 - catch it here instead of
+            // letting the parser churn through visual noise with no real findings.
+            const replacementCount = (text.match(/\uFFFD/g) || []).length;
+            const looksBinary = text.includes('\u0000') || (text.length > 0 && replacementCount / text.length > 0.01);
+            if (looksBinary) {
+                showToast(`"${file.name}" doesn't look like a plain-text config (binary or non-UTF-8 content detected). Export it as plain text/UTF-8 and try again.`, 'error');
+                return;
+            }
             parseText(file.name, text);
         };
-        reader.onerror = () => showToast('Could not read that file.', 'error');
+        reader.onerror = () => showToast(`Could not read "${file.name}" from disk.`, 'error');
         reader.readAsText(file);
+    }, [parseText, showToast]);
+
+    const loadSample = useCallback(async (sample: { href: string; filename: string }) => {
+        try {
+            const res = await fetch(sample.href);
+            if (!res.ok) throw new Error(String(res.status));
+            const text = await res.text();
+            parseText(sample.filename, text);
+        } catch (e) {
+            showToast('Could not load the sample config.', 'error');
+        }
     }, [parseText, showToast]);
 
     const onBrowseClick = () => fileInputRef.current?.click();
@@ -377,7 +444,7 @@ export default function IngestionPage() {
             });
             const data = await res.json();
             if (!res.ok) {
-                showToast(`Could not confirm mapping: ${data.detail || res.status}`, 'error');
+                showToast(`Could not confirm mapping: ${data.detail || res.status}`, 'error', { dataSaved: 'unknown', retrySafe: false });
                 return;
             }
             const updatedItems = items.map((it, i) => (i === activeIndex ? { ...it, status: 'confirmed' as const } : it));
@@ -399,7 +466,7 @@ export default function IngestionPage() {
             runSimulation({ silent: true });
         } catch (e) {
             console.error(e);
-            showToast('Error contacting backend. Is it running on port 8000?', 'error');
+            showToast('Error contacting backend. Is it running on port 8000?', 'error', { dataSaved: 'unknown', retrySafe: false });
         } finally {
             setIsConfirming(false);
         }
@@ -433,7 +500,7 @@ export default function IngestionPage() {
                     </div>
                     {trainedCount !== null && (
                         <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[14px] text-primary">model_training</span>
+                            <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-primary">model_training</span>
                             {trainedCount} Trained Parameter{trainedCount === 1 ? '' : 's'}
                         </span>
                     )}
@@ -445,6 +512,15 @@ export default function IngestionPage() {
                     onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
                     onDragLeave={() => setIsDragOver(false)}
                     onDrop={onDrop}
+                    tabIndex={0}
+                    role="button"
+                    aria-label="Upload a configuration file. Accepted types: .txt, .cfg, .conf, .json, .log. Max size 2 MB, plain text/UTF-8 encoding."
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onBrowseClick();
+                        }
+                    }}
                 >
                     <input
                         ref={fileInputRef}
@@ -454,7 +530,7 @@ export default function IngestionPage() {
                         onChange={onFileInputChange}
                     />
                     <div className="max-w-md mx-auto">
-                        <span className="material-symbols-outlined text-[48px] text-outline mb-stack-md" style={{ fontVariationSettings: "'wght' 200" }}>cloud_upload</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[48px] text-outline mb-stack-md" style={{ fontVariationSettings: "'wght' 200" }}>cloud_upload</span>
                         <h2 className="font-title-lg text-title-lg text-primary mb-2">Upload Configuration Files</h2>
                         <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Drag and drop a raw text config file - Cisco IOS or SONiC-style device configs both parse correctly.</p>
                         <div className="flex items-center justify-center gap-stack-md">
@@ -463,6 +539,25 @@ export default function IngestionPage() {
                             </button>
                             <span className="font-body-sm text-body-sm text-on-surface-variant">or drag a file here</span>
                         </div>
+                        <p className="font-body-sm text-[12px] text-on-surface-variant mt-stack-md">
+                            Accepted types: <span className="font-data-mono text-data-mono">.txt .cfg .conf .json .log</span> &middot; up to {MAX_FILE_SIZE_LABEL} &middot; plain text/UTF-8 encoding only.
+                        </p>
+                        <p className="font-body-sm text-[12px] text-on-surface-variant mt-2">
+                            No config on hand? Try a sample:{' '}
+                            {SAMPLE_CONFIGS.map((sample, i) => (
+                                <span key={sample.href}>
+                                    {i > 0 && ' · '}
+                                    <button
+                                        type="button"
+                                        onClick={() => loadSample(sample)}
+                                        className="text-primary underline hover:opacity-70 transition-opacity"
+                                    >
+                                        {sample.label}
+                                    </button>{' '}
+                                    (<a href={sample.href} download className="text-primary underline hover:opacity-70 transition-opacity">download</a>)
+                                </span>
+                            ))}
+                        </p>
                     </div>
                     {isParsing && (
                         <div className="absolute bottom-0 left-0 w-full h-1 bg-surface-container-high overflow-hidden">
@@ -478,7 +573,7 @@ export default function IngestionPage() {
                         <div className="flex flex-col border border-outline-variant rounded bg-surface-container-lowest overflow-hidden">
                             <div className="bg-surface-container px-4 py-2 border-b border-outline-variant flex justify-between items-center">
                                 <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-[16px]">terminal</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[16px]">terminal</span>
                                     Raw Input Stream
                                 </span>
                                 <span className="font-data-mono text-data-mono text-[11px] text-on-surface-variant">{fileName}</span>
@@ -509,14 +604,14 @@ export default function IngestionPage() {
                         <div className="flex flex-col border border-outline-variant rounded bg-surface-container-lowest overflow-hidden">
                             <div className="bg-surface-container px-4 py-2 border-b border-outline-variant flex justify-between items-center">
                                 <span className="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-[16px]">schema</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[16px]">schema</span>
                                     Semantic Mapping
                                     {items.length > 0 && (
                                         <span className="text-on-surface-variant">({reviewedCount}/{items.length} reviewed)</span>
                                     )}
                                 </span>
                                 <button aria-label="Re-scan file" onClick={rescan} disabled={isParsing} className="text-primary hover:opacity-70 transition-opacity disabled:opacity-40">
-                                    <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined text-[18px]">auto_awesome</span>
                                 </button>
                             </div>
                             <div className="flex-1 p-stack-md overflow-y-auto bg-surface-bright flex flex-col gap-stack-md">
@@ -565,14 +660,14 @@ export default function IngestionPage() {
                                     </div>
                                 ) : items.length > 0 ? (
                                     <div className="border border-dashed border-outline-variant rounded p-stack-lg flex flex-col items-center justify-center text-center bg-surface-container-lowest/50">
-                                        <span className="material-symbols-outlined text-[24px] text-[#15803d] mb-2">task_alt</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[24px] text-[#15803d] mb-2">task_alt</span>
                                         <span className="font-body-sm text-body-sm text-on-surface-variant">
                                             All {items.length} finding{items.length === 1 ? '' : 's'} reviewed - {items.filter((i) => i.status === 'confirmed').length} confirmed, {items.filter((i) => i.status === 'ignored').length} ignored.
                                         </span>
                                     </div>
                                 ) : (
                                     <div className="border border-dashed border-outline-variant rounded p-stack-lg flex flex-col items-center justify-center text-center bg-surface-container-lowest/50 opacity-60">
-                                        <span className="material-symbols-outlined text-[24px] text-outline mb-2">search_off</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[24px] text-outline mb-2">search_off</span>
                                         <span className="font-body-sm text-body-sm text-on-surface-variant">Try a config with recognizable directives (uRPF, SNMP, port-security, BGP neighbors...).</span>
                                     </div>
                                 )}
@@ -586,7 +681,7 @@ export default function IngestionPage() {
                 )}
                 {fileName && !reviewComplete && (
                     <div className="border border-dashed border-outline-variant rounded-xl p-stack-lg text-center bg-surface-container-lowest/50 flex flex-col items-center gap-2">
-                        <span className="material-symbols-outlined text-[28px] text-primary animate-pulse">schema</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[28px] text-primary animate-pulse">schema</span>
                         <p className="font-body-sm text-body-sm text-on-surface-variant max-w-md">
                             Confirm or ignore each finding on the right first - your risk sandbox and Monte Carlo simulation will appear here once all {items.length} are reviewed ({reviewedCount}/{items.length} so far).
                         </p>

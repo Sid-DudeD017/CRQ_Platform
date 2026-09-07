@@ -25,6 +25,7 @@ It bridges enterprise telemetry, **FAIR Monte Carlo risk math**, a **0/1 knapsac
 - [API Documentation](#-api-documentation)
 - [Testing & CI](#-testing--ci)
 - [Deployment](#-deployment)
+- [Data Lifecycle](#-data-lifecycle)
 - [Troubleshooting](#-troubleshooting)
 - [Security Notes](#-security-notes)
 - [License](#-license)
@@ -52,7 +53,7 @@ flowchart LR
 - **Backend API (`/backend`)** — FastAPI gateway. Owns the database (SQLite locally, Postgres/Neon in production), JWT auth, mock telemetry generation, the config-ingestion pipeline, and every REST endpoint the frontend calls.
 - **Quant Engine (`/quant-engine`)** — `monte_carlo.py` runs a 10,000+ iteration FAIR simulation (triangular-distributed loss magnitude × frequency) to produce ALE, VaR, and a SEBI Cyber Capability Index; `optimizer.py` solves a 0/1 knapsack (via PuLP/CBC) to pick the set of security controls that cuts the most risk per rupee of budget.
 - **AI Agent (`/ai-agent`)** — A LangGraph multi-agent "Virtual CISO" (Security Analyst / Compliance Officer / Quant Analyst sub-agents) backed by Groq, with a ChromaDB RAG index over NIST CSF, RBI, SEBI CSCRF, and DPDP Act 2023 reference material.
-- **Blockchain (`/blockchain`)** — `AuditLedger.sol`, a Hardhat/Solidity contract. Every "Accept Risk" decision is hashed and committed on-chain against a local Hardhat node, so the ledger is tamper-evident (disabled in the hosted demo — see [Deployment](#-deployment)).
+- **Blockchain (`/blockchain`)** — `AuditLedger.sol`, a Hardhat/Solidity contract. Every "Accept Risk" decision is hashed and committed on-chain, so the ledger is tamper-evident — a local Hardhat node for development, or the Sepolia testnet for a hosted deployment (see [Deployment](#-deployment)).
 
 ### Two independent data tracks
 
@@ -222,14 +223,33 @@ npm run dev
 ```
 ✅ Expected: `Ready on http://localhost:3000`.
 
-**Terminal 3 — Local Hardhat node (optional, for the on-chain audit trail)**
+**Terminal 3 — Local Hardhat node + contract deployment (optional, for the on-chain audit trail)**
 ```bash
 cd blockchain
-npx hardhat node
+npm install                              # first time only
+npx hardhat node                         # leave running
 ```
-Without this running, "Accept Risk" decisions still persist to the database — they just won't get a transaction hash.
+```bash
+# Second terminal, once per fresh node (the node's state resets every
+# restart, so redeploy any time you restart `npx hardhat node`):
+cd blockchain
+npx hardhat run scripts/deploy.js --network localhost
+```
+The deploy script prints the deployed contract's address, copies its ABI to `backend/AuditLedger.json`, and writes `CONTRACT_ADDRESS=<address>` into `backend/.env` for you — **restart the backend (Terminal 1) afterward** so it picks up the new address. Skipping the deploy step (or forgetting to restart the backend after redeploying) is the most common reason "Accept Risk" logs to the database fine but never shows a transaction hash — `backend/blockchain_client.py::is_available()` falls back to `false` (surfaced on `/api/status` and the workspace-status badge) whenever the node isn't reachable or the contract at `CONTRACT_ADDRESS` doesn't exist yet, and decisions still persist to the database regardless either way.
+
+> **Deploying somewhere hosted (Render, etc.) instead of your own machine?** A hosted backend can't reach a Hardhat node running on your laptop — deploy to the **Sepolia testnet** instead, which needs no locally-running node at all:
+> ```bash
+> cd blockchain
+> cp .env.example .env   # fill in SEPOLIA_RPC_URL + PRIVATE_KEY - see blockchain/.env.example
+> npx hardhat run scripts/deploy.js --network sepolia
+> ```
+> This writes `WEB3_PROVIDER_URL` / `CONTRACT_ADDRESS` / `DEPLOYER_PRIVATE_KEY` into `backend/.env` for you — copy those same three values into your Render service's env vars (already scaffolded in `render.yaml`). See [Deployment](#-deployment) for the full walkthrough.
 
 Open **http://localhost:3000**, sign up or log in, and pick Demo Data, Own Data, or Training on the start screen.
+
+### Demo reset procedure
+
+Before a live demo or a judging session, reset every account's state back to a pristine baseline with `POST /api/reset-demo` (admin/demo accounts only — see `backend/security.py::require_admin`; call it from Swagger at `/docs` while logged in as `ciso`/`cfo`, or `curl -X POST http://localhost:8000/api/reset-demo -H "Authorization: Bearer <admin token>"`). It wipes every own-data fleet, every simulation/decision/incident/training record across every account, then regenerates a fresh shared demo fleet — the same "wipe and reseed" utility documented inline in `backend/main.py::reset_demo`. **Only ever run this against a local or staging backend** (see `docs/STAGING.md`) — never against a production URL with real accounts' data on it.
 
 ### Quick end-to-end test
 
@@ -326,11 +346,44 @@ pytest -v
 
 ## ☁️ Deployment
 
-The hosted demo runs the **frontend on Vercel**, the **backend on Render**, backed by a **Neon Postgres** database. `render.yaml` is a Render Blueprint — in the Render dashboard, choose *New → Blueprint*, connect this repo, and it pre-fills the service; you paste in `DATABASE_URL` and `GROQ_API_KEY` yourself, and Render auto-generates a real `SECRET_KEY`.
+The hosted demo runs the **frontend on Vercel**, the **backend on Render**, backed by a **Neon Postgres** database. `render.yaml` is a Render Blueprint defining *two* independent services — `crq-platform-backend` (production) and `crq-platform-backend-staging` — so destructive/seed operations can be tested against staging without ever touching production data (see [Data Lifecycle](#-data-lifecycle) and `docs/STAGING.md`). In the Render dashboard, choose *New → Blueprint*, connect this repo, and it pre-fills both services; you paste in each one's own `DATABASE_URL` and `GROQ_API_KEY` yourself, and Render auto-generates a real `SECRET_KEY` for each. Each service also sets `ENVIRONMENT` (`production`/`staging`), echoed back by `GET /api/status` so you can always confirm which deployment you're actually talking to.
 
-The on-chain audit trail needs a local Hardhat node, so it's only available when running the stack locally — in the hosted demo, accepted-risk decisions still persist to the database, just without a transaction hash.
+The on-chain audit trail defaults to a local Hardhat node, which a hosted backend can't reach — but it doesn't have to run locally-only. Deploy `AuditLedger.sol` to the **Sepolia testnet** instead (free, no server of your own required):
+
+```bash
+cd blockchain
+cp .env.example .env
+# fill in .env:
+#   SEPOLIA_RPC_URL - a free Sepolia RPC endpoint, e.g.
+#     https://ethereum-sepolia-rpc.publicnode.com (no signup), or an
+#     Alchemy/Infura free-tier key for more reliable uptime
+#   PRIVATE_KEY - a fresh, testnet-only wallet funded with a little Sepolia
+#     ETH from a faucet (e.g. https://www.alchemy.com/faucets/ethereum-sepolia) -
+#     never a wallet holding real funds
+npx hardhat run scripts/deploy.js --network sepolia
+```
+
+This prints the deployed address and writes `WEB3_PROVIDER_URL` / `CONTRACT_ADDRESS` / `DEPLOYER_PRIVATE_KEY` into `backend/.env` — copy that same set of three values into each Render service's env vars (`render.yaml` already lists them, `sync: false`, so the dashboard prompts for them like it does `DATABASE_URL`/`GROQ_API_KEY`). Give production and staging **separate** contract deployments (redeploy once more for staging) so staging's test clicks never land in production's ledger — see `docs/STAGING.md`. Leave all three unset and the hosted backend behaves as it did before: `/api/status` reports the ledger "unavailable" and accepted-risk decisions still persist to the database, just without a transaction hash.
 
 > Remember: Vercel/Render only rebuild from what's pushed to GitHub. After merging changes locally, push to `main` (and trigger a redeploy if it isn't set to auto-deploy) before expecting the live site to reflect them.
+
+---
+
+## 🗃️ Data Lifecycle
+
+What's implemented in code vs. what's an operational recommendation for wherever this is actually deployed:
+
+**Implemented (self-service, in the app):**
+- `GET /api/account/export` — returns every row your account owns (assets, telemetry, simulations, risk decisions, ingested mappings, incident records, training completions, chat feedback ratings) as one JSON document.
+- `DELETE /api/account` (with `{"confirm": true}`) — permanently deletes all of the above, plus your account itself for a real (non-demo) account. Irreversible — export first if you want a copy.
+- `POST /api/admin/purge-stale-data` (admin-only) — deletes `TelemetryLog`/`RiskSimulation` rows older than a configurable window (default 365 days). **Never** touches `RiskDecision` (the audit ledger) or `IncidentRecord` (calibration ground truth) — see `backend/retention.py`'s docstring for why those are excluded on purpose. Nothing schedules this automatically; run it from an external cron (`curl -X POST .../api/admin/purge-stale-data -H "Authorization: Bearer $ADMIN_TOKEN"`) if you want it to run on a schedule.
+- `backend/database.py::init_db()` auto-migrates additively on every startup (`_add_missing_columns`/`_add_missing_indexes`) — safe for adding a nullable column or an index to an existing table, but it will never rename or drop a column. A genuinely destructive schema change (renaming/removing a column, changing a type) needs a one-off manual migration script — there's no Alembic in this project yet.
+- Full data-handling policy, in plain language: [`docs/PRIVACY.md`](docs/PRIVACY.md).
+
+**Operational recommendations (infrastructure-dependent, not code in this repo):**
+- **Backups** — local/demo SQLite: `sqlite3 crq_db.sqlite3 ".backup backup-$(date +%F).sqlite3"` on a nightly cron, keeping the last N days. Neon Postgres (production): Neon has built-in point-in-time recovery — no extra setup needed, but confirm the retention window on your plan.
+- **Restore testing** — periodically restore the latest backup into a scratch database and run `init_db()` against it, then spot-check row counts against the source. Not automated by anything in this repo; worth a recurring calendar reminder for a real deployment.
+- **Retention policy for backups themselves** — pick a window (e.g. 30 days of nightly SQLite backups, or whatever your Neon plan's PITR window is) and document it alongside `docs/PRIVACY.md` if this ever handles real user data at scale.
 
 ---
 
@@ -343,7 +396,7 @@ The on-chain audit trail needs a local Hardhat node, so it's only available when
 | Virtual CISO chat says please log in | `/api/chat` requires a bearer token — log in first. |
 | `GROQ_API_KEY` missing | Chat falls back to `OPENAI_API_KEY` if set; otherwise the agent can't respond. |
 | CORS error in the browser console | Check `NEXT_PUBLIC_API_URL` in `frontend/.env.local` matches where the backend is actually running. |
-| Accept Risk / commit-chain fails | The local Hardhat node (`npx hardhat node` in `blockchain/`) isn't running — decisions still save to the database either way. |
+| Accept Risk / commit-chain fails | Local dev: the Hardhat node (`npx hardhat node` in `blockchain/`) isn't running. Hosted: `WEB3_PROVIDER_URL`/`CONTRACT_ADDRESS`/`DEPLOYER_PRIVATE_KEY` aren't set to a deployed Sepolia contract yet, or `DEPLOYER_PRIVATE_KEY` doesn't match the wallet that deployed it (check the backend's startup logs for a `[blockchain_client]` warning). Either way, decisions still save to the database regardless. |
 
 ---
 
@@ -354,6 +407,7 @@ The on-chain audit trail needs a local Hardhat node, so it's only available when
 - `fetchWithRetry` (frontend) only retries on network errors/5xx responses and forces a clean logout on a 401, instead of retrying or silently failing on bad credentials.
 - Demo vs. Own Data are isolated at the query level — a demo run never reads or writes your uploaded data's rows, and vice versa.
 - `backend/.env` and `ai-agent/.env` are gitignored; only `.env.example` templates (with placeholder values) are committed.
+- Full risk register (uploaded configs, AI prompt injection, cross-tenant access, audit tampering, blockchain failures, exposed credentials, malicious telemetry, unauthorized approvals): [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ---
 
