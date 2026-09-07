@@ -205,6 +205,21 @@ export default function OptimizePage() {
                     risk_accepted: totalCost || 0,
                     board_approved: true,
                     data_source: dataSource,
+                    // [Approve & Log always 400ing - fix] backend/main.py's
+                    // POST /api/audit requires residual_ale/p95/
+                    // accepted_scenario/evidence_hash whenever
+                    // board_approved is true (see its "governance evidence
+                    // fix" comment) - evidence_hash itself is computed
+                    // server-side FROM active_controls, so omitting all of
+                    // these (as this call used to) meant every single
+                    // click here failed with a 400 "missing evidence"
+                    // error, unconditionally. Overview's own approveOptimizer
+                    // already sends these; this mirrors that.
+                    residual_ale: result?.monte_carlo?.mean_expected_loss ?? null,
+                    p95: result?.monte_carlo?.var_95 ?? null,
+                    accepted_scenario: result?.scenario_breakdown?.scenarios?.[0]?.scenario ?? null,
+                    active_controls: Object.fromEntries(selected.map((id: string) => [id, true])),
+                    budget: totalCost || budgetValue,
                 }),
             });
             const data = await res.json();

@@ -236,6 +236,22 @@ export default function IngestionPage() {
                     risk_accepted: simResults.optimization.total_cost || 0,
                     board_approved: true,
                     data_source: 'own',
+                    // [Approve & Log always 400ing - fix] backend/main.py's
+                    // POST /api/audit requires residual_ale/p95/
+                    // accepted_scenario/evidence_hash whenever
+                    // board_approved is true - evidence_hash is computed
+                    // server-side FROM active_controls, so omitting all of
+                    // these (as this call used to) meant every click here
+                    // failed with a 400 "missing evidence" error,
+                    // unconditionally. Mirrors overview/page.tsx's
+                    // already-correct approveOptimizer.
+                    residual_ale: simResults?.monte_carlo?.mean_expected_loss ?? null,
+                    p95: simResults?.monte_carlo?.var_95 ?? null,
+                    accepted_scenario: simResults?.scenario_breakdown?.scenarios?.[0]?.scenario ?? null,
+                    active_controls: Object.fromEntries(
+                        (simResults.optimization.selected_patches || []).map((id: string) => [id, true])
+                    ),
+                    budget: simResults.optimization.total_cost || (budget / 100) * 10000000,
                 }),
             });
             const data = await res.json();
