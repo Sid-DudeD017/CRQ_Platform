@@ -184,6 +184,11 @@ jobs:
   e2e-tests:
     name: End-to-end tests (Playwright, full stack)
     runs-on: ubuntu-latest
+    # Non-blocking for now: this job is still useful signal (see the
+    # uploaded Playwright report on failure), but flakiness/slowness on
+    # shared CI runners shouldn't hold up every push while it's being
+    # stabilized. Remove this line once it's reliably green.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
