@@ -324,13 +324,8 @@ export default function IntelligencePage() {
 
     return (
         <div className="max-w-[1400px] mx-auto flex flex-col gap-12">
-            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-stack-sm">
-                <div>
-                    <h1 className="font-display-lg text-display-lg text-primary mb-3 landing-font landing-heading-gradient tracking-tight">
-                        CRQ Intelligence
-                    </h1>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-col lg:flex-row lg:items-end gap-stack-sm">
+                <div className="flex items-center gap-2 flex-wrap lg:ml-auto">
                     {lastRefreshedAt && (
                         <span className="font-label-caps text-label-caps text-on-surface-variant whitespace-nowrap">
                             Updated {lastRefreshedAt.toLocaleTimeString()}

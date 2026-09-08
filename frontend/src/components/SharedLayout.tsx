@@ -294,6 +294,53 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
     if (!dataSourceHydrated) {
         return null;
     }
+
+    // Intelligence is its own standalone section - like Home/Dashboard/
+    // Training, not a tab bolted onto whichever workspace (demo/own data)
+    // happens to be active. It gets a minimal header of its own (logo +
+    // Home/Dashboard/Intelligence pills, matching the picker screen) rather
+    // than the full station-tabs dashboard chrome below, and it is exempt
+    // from the picker gate so it's reachable however dataSource is set.
+    if (pathname === '/intelligence') {
+        return (
+            <div className="relative min-h-screen bg-background text-on-background overflow-x-hidden">
+                <div className="ambient-glow" aria-hidden="true" />
+                <nav className="relative z-10 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1400px] mx-auto">
+                    <Link href="/" onClick={goHome} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity" title="Go to the home page">
+                        <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
+                    </Link>
+                    <div className="flex items-center gap-1 bg-surface-container-low border border-outline-variant rounded-full p-1">
+                        <button
+                            onClick={goHome}
+                            className="px-5 py-2 rounded-full font-body-sm text-body-sm font-semibold transition-all text-on-surface-variant hover:text-primary"
+                        >
+                            Home
+                        </button>
+                        <button
+                            onClick={returnToStart}
+                            className="px-5 py-2 rounded-full font-body-sm text-body-sm font-semibold transition-all text-on-surface-variant hover:text-primary"
+                        >
+                            Dashboard
+                        </button>
+                        <button
+                            className="px-5 py-2 rounded-full font-body-sm text-body-sm font-semibold transition-all landing-cta-gradient shadow-md"
+                        >
+                            Intelligence
+                        </button>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-[#15803d]">verified_user</span>
+                        <span className="text-on-surface whitespace-nowrap">Logged in</span>
+                        <button onClick={logout} className="text-on-surface-variant hover:text-error underline ml-1">Logout</button>
+                    </div>
+                </nav>
+                <main className="relative z-10 px-6 sm:px-10 py-12 sm:py-16 max-w-[1400px] mx-auto animate-fade-scale-in">
+                    {children}
+                </main>
+            </div>
+        );
+    }
+
     if ((dataSource === null || pathname === '/') && pathname !== '/training') {
         // Same copy as the public LandingPage, reused here so "Home" reads
         // as a continuation of the marketing site instead of a different
@@ -339,6 +386,12 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             className={`px-5 py-2 rounded-full font-body-sm text-body-sm font-semibold transition-all ${startTab === 'dashboard' ? 'landing-cta-gradient shadow-md' : 'text-on-surface-variant hover:text-primary'}`}
                         >
                             Dashboard
+                        </button>
+                        <button
+                            onClick={() => router.push('/intelligence')}
+                            className="px-5 py-2 rounded-full font-body-sm text-body-sm font-semibold transition-all text-on-surface-variant hover:text-primary"
+                        >
+                            Intelligence
                         </button>
                     </div>
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low border border-outline-variant rounded font-label-caps text-label-caps">
@@ -558,8 +611,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                             <span aria-hidden="true" className="material-symbols-outlined">{isMobileNavOpen ? 'close' : 'menu'}</span>
                         </button>
                         <Link href="/" onClick={goHome} className="flex items-center gap-2 hover:opacity-80 transition-opacity" title="Go to the home page">
-                            <span className="w-7 h-7 rounded-md landing-cta-gradient shrink-0" aria-hidden="true" />
-                            <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
+                            <img src="/suraksha-logo.png" alt="Suraksha" className="h-9 w-auto shrink-0" />
                         </Link>
                         {workspaceLabel && (
                             <WorkspaceStatusPopover
