@@ -309,7 +309,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
             { value: '24/7', label: 'AI compliance assistant' },
         ];
         const about = [
-            { icon: 'query_stats', title: 'Quantified, Not Color-Coded', desc: 'Risk expressed in rupees - Annualized Loss Expectancy and Value at Risk - not red/yellow/green heatmaps.' },
+            { icon: 'lock', title: 'Blockchain Security', desc: 'Immutable records on Fabric-like ledgers guarantee transparency and tamper resistance.' },
             { icon: 'link', title: 'Tamper-Evident Ledger', desc: 'Accepted risk decisions are committed to a blockchain audit trail that cannot be quietly edited later.' },
             { icon: 'model_training', title: 'Closed-Loop Calibration', desc: 'Real incident outcomes feed back into the model, sharpening every future prediction.' },
             { icon: 'policy', title: 'Compliance, Mapped Automatically', desc: 'Every control is cross-walked to SEBI CSCRF, DPDP Act 2023, and NIST & ISO 27001 in real time.' },
