@@ -91,7 +91,7 @@ o Support for generating evidence-based reports and dashboards for audits, regul
 • More rational and optimized cybersecurity investment decisions, maximizing risk reduction per unit of spend.
 
 • Reduction in both the likelihood and financial impact of cyber incidents through targeted remediation and investment strategies.
-
+  
     
 
 
