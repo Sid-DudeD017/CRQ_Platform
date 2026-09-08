@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { formatRupeesCompact } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 
@@ -125,7 +126,7 @@ const labelCls = 'font-label-caps text-label-caps text-on-surface-variant upperc
 
 function money(v: number | null | undefined): string {
     if (v === null || v === undefined) return '—';
-    return `₹${(v / 100000).toFixed(1)}L`;
+    return formatRupeesCompact(v);
 }
 
 function pct(v: number | null | undefined, digits = 1): string {

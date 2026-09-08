@@ -1,6 +1,7 @@
 "use client";
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { formatRupeesCr } from '@/lib/format';
 
 interface MonteCarloCurveProps {
     distributionCurve: Array<{ loss: number; probability: number }>;
@@ -26,7 +27,7 @@ export default function MonteCarloCurve({
         );
     }
 
-    const formatCr = (val: number) => `₹${(val / 10000000).toFixed(2)} Cr`;
+    const formatCr = formatRupeesCr;
 
     return (
         <div className="w-full flex flex-col gap-2">
@@ -42,7 +43,7 @@ export default function MonteCarloCurve({
                         <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                         <XAxis
                             dataKey="loss"
-                            tickFormatter={(val) => `₹${(val / 10000000).toFixed(1)}Cr`}
+                            tickFormatter={(val) => formatRupeesCr(val)}
                             fontSize={11}
                             stroke="#8d8f96"
                         />

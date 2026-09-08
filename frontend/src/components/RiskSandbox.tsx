@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from 'react';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { formatRupeesCompact, formatRupeesCr } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import CountUp from './CountUp';
@@ -32,6 +33,11 @@ export const STRATEGIC_CONTROLS: { name: string; costLabel: string }[] = [
 export interface RiskSandboxProps {
     simResults: any;
     isSimulating: boolean;
+    // [P0-STALE-006] True when the most recent Run Simulation attempt
+    // failed (network error, backend error) - everything below is still
+    // whatever the last SUCCESSFUL run produced, not a new result, and
+    // this is the only way that's visible once the failure toast fades.
+    lastRunFailed?: boolean;
     budget: number;
     handleBudgetChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     controls: Record<string, boolean>;
@@ -68,6 +74,7 @@ export interface RiskSandboxProps {
 export default function RiskSandbox({
     simResults,
     isSimulating,
+    lastRunFailed = false,
     budget,
     handleBudgetChange,
     controls,
@@ -105,9 +112,6 @@ export default function RiskSandbox({
     const currentBudgetRupees = (budget / 100) * 10000000;
     const lastRunBudgetRupees = typeof simResults?.budget_used === 'number' ? simResults.budget_used : null;
     const isOptimizerStale = lastRunBudgetRupees !== null && Math.abs(lastRunBudgetRupees - currentBudgetRupees) > 1000;
-    const formatRupees = (amount: number) => (
-        amount >= 10000000 ? `₹${(amount / 10000000).toFixed(2)} Cr` : `₹${(amount / 100000).toFixed(0)}L`
-    );
 
 
     // [Deploy-level polish] Replay the "pop up nicely" entrance animation
@@ -225,7 +229,7 @@ export default function RiskSandbox({
         <div>
         <div className="flex justify-between mb-2">
         <label htmlFor="sandbox-budget" className="font-body-sm text-body-sm font-semibold">Security Budget Allocation</label>
-        <span className="font-data-mono text-data-mono font-bold" aria-hidden="true">{budget >= 100 ? `₹${(budget/100).toFixed(2)} Cr` : `₹${((budget/100)*100).toFixed(0)}L`}</span>
+        <span className="font-data-mono text-data-mono font-bold" aria-hidden="true">{formatRupeesCompact((budget / 100) * 10000000)}</span>
         </div>
         <input
             id="sandbox-budget"
@@ -252,11 +256,11 @@ export default function RiskSandbox({
                     title="You moved the budget slider after this optimizer result was computed - it still reflects the old budget. Click Run Simulation below to recompute it for the budget shown above."
                 >
                     <span aria-hidden="true" className="material-symbols-outlined text-[14px]">history</span>
-                    From your last run at {formatRupees(lastRunBudgetRupees as number)}
+                    From your last run at {formatRupeesCompact(lastRunBudgetRupees as number)}
                 </span>
               )}
               <span className="font-label-caps text-label-caps text-on-surface-variant">
-                Optimized Cost: ₹{(Number(simResults.optimization.total_cost) / 100000).toFixed(1)}L
+                Optimized Cost: {formatRupeesCompact(Number(simResults.optimization.total_cost))}
               </span>
               <button
                 onClick={applyRecommended}
@@ -285,7 +289,7 @@ export default function RiskSandbox({
         {optimizerPicks && optimizerPicks.includes(c.name) && (
             <span
                 className={`px-1.5 py-0.5 rounded font-label-caps text-label-caps flex items-center gap-0.5 ${isOptimizerStale ? 'bg-[#ca8a04]/10 text-[#ca8a04]' : 'bg-[#15803d]/10 text-[#15803d]'}`}
-                title={isOptimizerStale ? `Recommended for your last run at ${formatRupees(lastRunBudgetRupees as number)} - not the current budget. Click Run Simulation to refresh.` : undefined}
+                title={isOptimizerStale ? `Recommended for your last run at ${formatRupeesCompact(lastRunBudgetRupees as number)} - not the current budget. Click Run Simulation to refresh.` : undefined}
             >
                 <span aria-hidden="true" className="material-symbols-outlined text-[12px]">auto_awesome</span>{isOptimizerStale ? 'Recommended (stale)' : 'Recommended'}
             </span>
@@ -310,6 +314,12 @@ export default function RiskSandbox({
 
     return (
         <>
+{lastRunFailed && simResults && (
+    <div className="flex items-center gap-2 mb-stack-md px-3 py-2 rounded-lg bg-error/10 border border-error/30 text-error font-body-sm text-body-sm">
+        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">error</span>
+        <span>Your last refresh attempt failed - everything below is still showing the previous successful result. Click Run Simulation to try again.</span>
+    </div>
+)}
 {/*  Bento Grid Layout  */}
 <div ref={heroSectionRef} className="grid grid-cols-12 gap-gutter mb-stack-lg animate-result-reveal">
 {/*  Centerpiece: ALE  */}
@@ -349,7 +359,7 @@ export default function RiskSandbox({
 {simResults?.confidence_band && (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-data-mono font-body-sm text-body-sm text-on-surface-variant">
-            ₹{(simResults.confidence_band.ale_low / 10000000).toFixed(2)}–{(simResults.confidence_band.ale_high / 10000000).toFixed(2)} Cr
+            {formatRupeesCr(simResults.confidence_band.ale_low)}–{formatRupeesCr(simResults.confidence_band.ale_high).replace('₹', '')}
         </span>
         <span className="font-body-sm text-body-sm text-on-surface-variant">{simResults.confidence_band.band_pct}% confidence band</span>
         {typeof simResults?.calibration?.uncertainty_score === 'number' && (
@@ -405,7 +415,7 @@ export default function RiskSandbox({
                     </div>
                     <div className="text-right shrink-0">
                         <div className="font-data-mono text-body-sm font-semibold text-on-surface">{s.share_pct}%</div>
-                        <div className="font-label-caps text-label-caps text-on-surface-variant">₹{(s.allocated_var_95 / 10000000).toFixed(2)} Cr P95</div>
+                        <div className="font-label-caps text-label-caps text-on-surface-variant">{formatRupeesCr(s.allocated_var_95)} P95</div>
                     </div>
                 </div>
             ))}
@@ -488,7 +498,7 @@ export default function RiskSandbox({
             <XAxis dataKey="loss" hide={true} />
             <YAxis hide={true} />
             <Tooltip
-                formatter={(value: any, name: any, props: any) => [`${(props.payload.loss / 10000000).toFixed(2)} Cr`, 'Loss']}
+                formatter={(value: any, name: any, props: any) => [formatRupeesCr(props.payload.loss), 'Loss']}
                 labelFormatter={() => ''}
             />
             <Area type="monotone" dataKey="probability" stroke="var(--primary)" strokeWidth={2} fillOpacity={1} fill="url(#colorLoss)" />
@@ -598,8 +608,8 @@ export default function RiskSandbox({
         { label: 'Threat Event Frequency (events/yr)', range: `${fi.tef_min?.toFixed(1)} – ${fi.tef_mode?.toFixed(1)} – ${fi.tef_max?.toFixed(1)}` },
         { label: 'Threat Capability (0–100)', range: `${fi.tc_min?.toFixed(1)} – ${fi.tc_mode?.toFixed(1)} – ${fi.tc_max?.toFixed(1)}` },
         { label: 'Control Strength (0–100)', range: `${fi.cs_min?.toFixed(1)} – ${fi.cs_mode?.toFixed(1)} – ${fi.cs_max?.toFixed(1)}` },
-        { label: 'Primary Loss Magnitude (₹)', range: `${(fi.plm_min / 100000)?.toFixed(1)}L – ${(fi.plm_mode / 100000)?.toFixed(1)}L – ${(fi.plm_max / 100000)?.toFixed(1)}L` },
-        { label: 'Secondary Loss Magnitude (₹)', range: `${(fi.slm_min / 100000)?.toFixed(1)}L – ${(fi.slm_mode / 100000)?.toFixed(1)}L – ${(fi.slm_max / 100000)?.toFixed(1)}L` },
+        { label: 'Primary Loss Magnitude (₹)', range: `${formatRupeesCompact(fi.plm_min)} – ${formatRupeesCompact(fi.plm_mode)} – ${formatRupeesCompact(fi.plm_max)}` },
+        { label: 'Secondary Loss Magnitude (₹)', range: `${formatRupeesCompact(fi.slm_min)} – ${formatRupeesCompact(fi.slm_mode)} – ${formatRupeesCompact(fi.slm_max)}` },
     ];
     return (
         <details className="group">
@@ -702,7 +712,7 @@ export default function RiskSandbox({
                     </div>
                     {attackPath.loss_range && (
                         <p className="font-body-sm text-body-sm text-on-surface-variant">
-                            Estimated loss if this path is exploited: <span className="font-data-mono font-semibold text-on-surface">₹{(attackPath.loss_range.low / 10000000).toFixed(2)}–₹{(attackPath.loss_range.high / 10000000).toFixed(2)} Cr</span> ({attackPath.hop_count} hop{attackPath.hop_count === 1 ? '' : 's'} from the network edge), scaled from this run&apos;s real ALE/VaR by this asset&apos;s share of total business value.
+                            Estimated loss if this path is exploited: <span className="font-data-mono font-semibold text-on-surface">{formatRupeesCr(attackPath.loss_range.low)}–{formatRupeesCr(attackPath.loss_range.high)}</span> ({attackPath.hop_count} hop{attackPath.hop_count === 1 ? '' : 's'} from the network edge), scaled from this run&apos;s real ALE/VaR by this asset&apos;s share of total business value.
                         </p>
                     )}
                 </>
@@ -768,7 +778,7 @@ export default function RiskSandbox({
                 <div className="flex justify-between items-end mb-1">
                 <span className="font-body-sm text-body-sm font-medium">{unit.business_unit}</span>
                 <span className="font-data-mono text-data-mono font-bold">
-                  ₹{(riskRupees / 10000000).toFixed(2)} Cr/yr
+                  {formatRupeesCr(riskRupees)}/yr
                 </span>
                 <button
                     onClick={() => acceptRisk(unit.business_unit, riskRupees)}

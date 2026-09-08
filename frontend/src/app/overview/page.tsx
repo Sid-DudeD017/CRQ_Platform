@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { formatRupeesCr } from '@/lib/format';
 import CountUp from '@/components/CountUp';
 import RiskSandbox, { STRATEGIC_CONTROLS } from '@/components/RiskSandbox';
 
@@ -22,7 +23,7 @@ function buildDriftInsight(latest: any, prev: any): DriftInsight | null {
     if (!latest || !prev || !prev.expected_annual_loss) return null;
     const aleDelta = ((latest.expected_annual_loss - prev.expected_annual_loss) / prev.expected_annual_loss) * 100;
     const tone: 'up' | 'down' | 'flat' = aleDelta < -1 ? 'down' : aleDelta > 1 ? 'up' : 'flat';
-    const aleCr = (v: number) => `₹${(v / 10000000).toFixed(2)} Cr`;
+    const aleCr = formatRupeesCr;
     const lines: string[] = [];
 
     if (tone === 'flat') {
@@ -106,6 +107,14 @@ export default function ExecutiveDashboard() {
     const [budget, setBudget] = useState(65);
     const [simResults, setSimResults] = useState<any>(null);
     const [isSimulating, setIsSimulating] = useState(false);
+    // [P0-STALE-006 - failed refresh] A failed Run Simulation used to
+    // leave the previous (still-accurate-for-its-own-scenario) results on
+    // screen with nothing but a toast that vanishes in a few seconds - so
+    // anyone who glanced at the dashboard moments later saw what looked
+    // like a perfectly normal, current result with no sign that the most
+    // recent attempt to refresh it had actually failed. This tracks that
+    // persistently so the sandbox can say so until the next attempt.
+    const [lastRunFailed, setLastRunFailed] = useState(false);
     const [controls, setControls] = useState<Record<string, boolean>>(
         Object.fromEntries(STRATEGIC_CONTROLS.map((c) => [c.name, c.name === 'Enforce Cloud MFA']))
     );
@@ -288,9 +297,11 @@ export default function ExecutiveDashboard() {
                 // Simulation button (and its own error toast) is still
                 // right there below.
                 if (!opts?.silent) showToast(`Simulation failed: ${data.detail || res.status}`, 'error', { dataSaved: 'no', retrySafe: true });
+                setLastRunFailed(true);
                 return;
             }
             setSimResults(data);
+            setLastRunFailed(false);
             if (!dataGenerated) {
                 setDataGenerated(true);
                 try { localStorage.setItem('crq_step_data_generated', '1'); } catch (e) {}
@@ -344,6 +355,7 @@ export default function ExecutiveDashboard() {
             if (requestId !== simRequestIdRef.current) return;
             console.error(e);
             if (!opts?.silent) showToast("Error running simulation. Ensure FastAPI is running on port 8000.", 'error', { dataSaved: 'no', retrySafe: true });
+            setLastRunFailed(true);
         } finally {
             if (requestId === simRequestIdRef.current) {
                 // [Deploy-level polish] A manual run that resolves in
@@ -424,8 +436,16 @@ export default function ExecutiveDashboard() {
                     residual_ale: simResults?.monte_carlo?.mean_expected_loss ?? null,
                     p95: simResults?.monte_carlo?.var_95 ?? null,
                     accepted_scenario: simResults?.scenario_breakdown?.scenarios?.[0]?.scenario ?? null,
-                    active_controls: controls,
-                    budget: (budget / 100) * 10000000,
+                    // [Risk Decision Passport integrity fix] These used to
+                    // read live `controls`/`budget` state - if you nudged a
+                    // toggle or the slider after Run Simulation but before
+                    // clicking Accept Risk (without re-running), the
+                    // logged "what was accepted" config wouldn't match the
+                    // residual_ale/p95 actually being accepted above. Now
+                    // sourced from the same completed run those numbers
+                    // came from, same as approveOptimizer already does.
+                    active_controls: simResults?.active_controls_used ?? controls,
+                    budget: simResults?.budget_used ?? (budget / 100) * 10000000,
                 }),
             });
             const data = await res.json();
@@ -594,6 +614,7 @@ export default function ExecutiveDashboard() {
     runVersion={resultVersion}
     simResults={simResults}
     isSimulating={isSimulating}
+    lastRunFailed={lastRunFailed}
     budget={budget}
     handleBudgetChange={handleBudgetChange}
     controls={controls}

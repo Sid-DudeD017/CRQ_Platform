@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { formatRupeesCr } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useServiceStatus } from '@/lib/useServiceStatus';
@@ -330,7 +331,7 @@ export default function LedgerPage() {
                 </div>
                 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                     <div className="font-label-caps text-label-caps text-on-surface-variant mb-1">Total Risk Accepted</div>
-                    <div className="font-headline-md text-headline-md text-primary font-data-mono">₹{(totalRisk / 10000000).toFixed(2)} Cr</div>
+                    <div className="font-headline-md text-headline-md text-primary font-data-mono">{formatRupeesCr(totalRisk)}</div>
                 </div>
                 <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-gutter">
                     <div className="font-label-caps text-label-caps text-on-surface-variant mb-1">Committed On-Chain</div>
@@ -384,7 +385,7 @@ export default function LedgerPage() {
                                     <tr className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors animate-fade-scale-in">
                                         <td className="py-3 px-4 font-data-mono text-data-mono text-on-surface-variant">#{d.id}</td>
                                         <td className="py-3 px-4 font-body-sm text-body-sm">{d.action}</td>
-                                        <td className="py-3 px-4 font-data-mono text-data-mono font-bold">₹{(d.risk_accepted / 10000000).toFixed(2)} Cr</td>
+                                        <td className="py-3 px-4 font-data-mono text-data-mono font-bold">{formatRupeesCr(d.risk_accepted)}</td>
                                         <td className="py-3 px-4 font-body-sm text-body-sm">
                                             <span className="px-2 py-0.5 bg-secondary-container text-on-secondary-container rounded font-label-caps text-label-caps">{d.decided_by}</span>
                                         </td>
@@ -461,8 +462,8 @@ export default function LedgerPage() {
                                             { label: 'Model snapshot', value: d.model_snapshot ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_snapshot}</code> : notAvailable },
                                             { label: 'Risk model version', value: d.model_version ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.model_version}</code> : notAvailable },
                                             { label: 'Control library version', value: d.control_library_version ? <code className="font-data-mono text-data-mono px-1.5 py-0.5 bg-surface-container rounded">{d.control_library_version}</code> : notAvailable },
-                                            { label: 'Residual ALE', value: typeof d.residual_ale === 'number' ? `₹${(d.residual_ale / 10000000).toFixed(2)} Cr` : notAvailable },
-                                            { label: 'P95 (VaR)', value: typeof d.p95 === 'number' ? `₹${(d.p95 / 10000000).toFixed(2)} Cr` : notAvailable },
+                                            { label: 'Residual ALE', value: typeof d.residual_ale === 'number' ? formatRupeesCr(d.residual_ale) : notAvailable },
+                                            { label: 'P95 (VaR)', value: typeof d.p95 === 'number' ? formatRupeesCr(d.p95) : notAvailable },
                                             { label: 'Accepted scenario', value: d.accepted_scenario || notAvailable },
                                             { label: 'Recommended control not funded', value: d.recommended_control_not_funded || 'None - fully funded to the optimizer\'s recommendation' },
                                             { label: 'Reason', value: d.reason || notAvailable },

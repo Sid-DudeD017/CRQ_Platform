@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { API_BASE } from '@/lib/api';
+import { formatRupeesCr, formatRupeesExact } from '@/lib/format';
 import { useServiceStatus } from '@/lib/useServiceStatus';
 import VirtualCisoChat from './VirtualCisoChat';
 import WorkspaceStatusPopover from './WorkspaceStatusPopover';
@@ -437,10 +438,6 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 </button>
                             )}
                             <div className="text-center mb-stack-lg">
-                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full landing-icon-badge font-label-caps text-label-caps font-semibold mb-stack-sm">
-                                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">rocket_launch</span>
-                                    Getting Started
-                                </span>
                                 <h1 className="font-headline-md text-headline-md landing-font landing-heading-gradient mb-1">How do you want to start?</h1>
                                 <p className="font-body-md text-body-md text-on-surface-variant max-w-xl mx-auto">Pick one - you can switch anytime from &quot;Switch Dashboard&quot; in the top bar, and nothing you&apos;ve already run gets lost.</p>
                             </div>
@@ -865,13 +862,13 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                         <div className="bg-surface-container-low border border-outline-variant rounded p-3">
                                             <div className="font-label-caps text-label-caps text-on-surface-variant">Expected Annual Loss</div>
                                             <div className="font-data-mono text-data-mono font-bold text-primary">
-                                                ₹{(analysisResult.monte_carlo.mean_expected_loss / 10000000).toFixed(2)} Cr
+                                                {formatRupeesCr(analysisResult.monte_carlo.mean_expected_loss)}
                                             </div>
                                         </div>
                                         <div className="bg-surface-container-low border border-outline-variant rounded p-3">
                                             <div className="font-label-caps text-label-caps text-on-surface-variant">95% VaR</div>
                                             <div className="font-data-mono text-data-mono font-bold text-primary">
-                                                ₹{(analysisResult.monte_carlo.var_95 / 10000000).toFixed(2)} Cr
+                                                {formatRupeesCr(analysisResult.monte_carlo.var_95)}
                                             </div>
                                         </div>
                                     </div>
@@ -881,7 +878,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                             {analysisResult.optimization.selected_patches.join(', ') || 'None within budget'}
                                         </div>
                                         <div className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-                                            Total cost: ₹{Number(analysisResult.optimization.total_cost).toLocaleString()} · Risk reduced: ₹{Number(analysisResult.optimization.total_risk_reduced).toLocaleString()}
+                                            Total cost: {formatRupeesExact(Number(analysisResult.optimization.total_cost))} · Risk reduced: {formatRupeesExact(Number(analysisResult.optimization.total_risk_reduced))}
                                         </div>
                                     </div>
                                 </div>

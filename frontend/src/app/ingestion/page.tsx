@@ -83,6 +83,10 @@ export default function IngestionPage() {
     const [budget, setBudget] = useState(50);
     const [simResults, setSimResults] = useState<any>(null);
     const [isSimulating, setIsSimulating] = useState(false);
+    // [P0-STALE-006 - failed refresh] Same fix as the demo dashboard -
+    // a failed Run Simulation used to leave the previous result on screen
+    // with nothing but a toast to say the refresh attempt didn't land.
+    const [lastRunFailed, setLastRunFailed] = useState(false);
     const [controls, setControls] = useState<Record<string, boolean>>(
         Object.fromEntries(STRATEGIC_CONTROLS.map((c) => [c.name, c.name === 'Enforce Cloud MFA']))
     );
@@ -144,9 +148,11 @@ export default function IngestionPage() {
             if (requestId !== simRequestIdRef.current) return;
             if (!res.ok) {
                 if (!opts?.silent) showToast(`Simulation failed: ${data.detail || res.status}`, 'error');
+                setLastRunFailed(true);
                 return;
             }
             setSimResults(data);
+            setLastRunFailed(false);
             const picks: string[] = data.optimization.selected_patches || [];
             setOptimizerPicks(picks);
             persistIngestionState({ budget, controls, simResults: data, optimizerPicks: picks });
@@ -168,6 +174,7 @@ export default function IngestionPage() {
             if (requestId !== simRequestIdRef.current) return;
             console.error(e);
             if (!opts?.silent) showToast('Error running simulation. Ensure FastAPI is running on port 8000.', 'error', { dataSaved: 'no', retrySafe: true });
+            setLastRunFailed(true);
         } finally {
             if (requestId === simRequestIdRef.current) {
                 // Same 0.5s perceived-work floor as the demo dashboard,
@@ -724,6 +731,7 @@ export default function IngestionPage() {
                             sandboxMode="whatIf"
                             simResults={simResults}
                             isSimulating={isSimulating}
+                            lastRunFailed={lastRunFailed}
                             budget={budget}
                             handleBudgetChange={handleBudgetChange}
                             controls={controls}

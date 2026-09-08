@@ -19,6 +19,7 @@ Merged from two branches off the same base (12462e7):
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
 from datetime import datetime, timedelta
@@ -1125,6 +1126,35 @@ def get_attack_path(
     return {"status": "success", "data": result}
 
 
+# [P0-NUM-005 / P0-API-008 hardening] The FAIR Monte Carlo pipeline has
+# several guarded divisions and clamps already (see risk_engine.py), but
+# nothing previously stopped a NaN/+-Infinity that slipped through some
+# future code path from being silently JSON-serialized straight to the
+# frontend - Python's json module happily emits the non-standard tokens
+# NaN/Infinity/-Infinity, which either crash a strict JSON.parse or render
+# as literal "NaN" on a card/chart with no explanation. Rather than adding
+# a bespoke Pydantic response_model with FiniteFloat fields for every one
+# of these deeply-nested, evolving result dicts, this walks the actual
+# response once right before it goes out and fails loudly (500, naming the
+# exact field) instead of shipping an impossible number silently.
+def _first_non_finite_path(obj: Any, path: str = "response") -> Optional[str]:
+    if isinstance(obj, float):
+        return None if math.isfinite(obj) else path
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            found = _first_non_finite_path(v, f"{path}.{k}")
+            if found:
+                return found
+        return None
+    if isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            found = _first_non_finite_path(v, f"{path}[{i}]")
+            if found:
+                return found
+        return None
+    return None
+
+
 @app.post("/api/simulate-risk")
 @limiter.limit("10/minute")
 def simulate_risk(
@@ -1265,6 +1295,24 @@ def simulate_risk(
         "is_dpdp_applicable": inputs.get("is_dpdp_applicable"),
     }
 
+    # [P0-NUM-005 / P0-API-008] Check the core numeric results for a
+    # non-finite value BEFORE persisting - the full response gets a second,
+    # broader check right before it's returned (see _first_non_finite_path
+    # above), but that runs after this row would already be committed, so
+    # a bad simulate-risk call would otherwise leave a corrupt row behind
+    # even once the frontend correctly rejects the response.
+    bad_field = _first_non_finite_path({
+        "monte_carlo": mc_results,
+        "confidence_band": confidence_band,
+        "optimization": opt_results,
+    })
+    if bad_field:
+        observability.record_simulation_result(success=False)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Simulation produced a non-finite value at {bad_field} - nothing was saved. Please retry; if this persists, the input data likely has an extreme or malformed value.",
+        )
+
     sim_record = models.RiskSimulation(
         expected_annual_loss=mc_results["mean_expected_loss"],
         var_95=mc_results.get("var_95"),
@@ -1299,11 +1347,18 @@ def simulate_risk(
     db.commit()
     observability.record_simulation_result(success=True)
 
-    return {
+    response_payload = {
         "status": "success",
         "message": "Risk simulation completed",
         "data_source": payload.data_source,
         "budget_used": payload.budget,
+        # [Risk Decision Passport integrity fix] Echoed back so a caller
+        # logging an accept/approve decision later can attach the exact
+        # control configuration that produced THIS result, instead of
+        # whatever the dashboard's live toggles happen to show by the time
+        # the user clicks Accept - see acceptRisk in overview/page.tsx,
+        # which used to read live `controls` state instead of this.
+        "active_controls_used": payload.active_controls or {},
         "monte_carlo": {
             "mean_expected_loss": mc_results["mean_expected_loss"],
             "var_95": mc_results["var_95"],
@@ -1342,6 +1397,17 @@ def simulate_risk(
         # Overview "Where this number comes from" panel.
         "provenance": provenance,
     }
+
+    # [P0-NUM-005 / P0-API-008] Reject rather than ship a NaN/Infinity -
+    # see _first_non_finite_path above.
+    bad_field = _first_non_finite_path(response_payload)
+    if bad_field:
+        observability.record_simulation_result(success=False)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Simulation produced a non-finite value at {bad_field} - this run was not saved. Please retry; if this persists, the input data likely has an extreme or malformed value.",
+        )
+    return response_payload
 
 
 @app.get("/api/simulations")

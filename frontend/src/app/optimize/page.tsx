@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, R
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { API_BASE } from '@/lib/api';
+import { formatRupeesCompact } from '@/lib/format';
 
 // Mirrors backend/risk_engine.py's SECURITY_CONTROLS exactly - kept in sync
 // manually since the optimizer endpoint only returns which patch IDs were
@@ -52,12 +53,6 @@ const MAX_BUDGET = 10000000;
 // SECURITY_CONTROLS comment) every control cost and most budget values on
 // this page are well under Rs 1 Cr, and "Rs0.02 Cr" reads far worse than
 // "Rs2L".
-function formatINR(value: number) {
-    const cr = value / 10000000;
-    if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
-    return `₹${(value / 100000).toFixed(1)}L`;
-}
-
 const KPI_ICONS = {
     budget: 'account_balance_wallet',
     reduced: 'trending_down',
@@ -257,7 +252,7 @@ export default function OptimizePage() {
                 />
                 <div className="flex justify-between items-center mb-stack-sm">
                     <label htmlFor="optimizer-budget" className="font-body-sm text-body-sm font-semibold">Security Budget Allocation</label>
-                    <span className="font-data-mono text-[15px] font-bold text-primary tabular-nums" aria-hidden="true">{formatINR(budgetValue)}</span>
+                    <span className="font-data-mono text-[15px] font-bold text-primary tabular-nums" aria-hidden="true">{formatRupeesCompact(budgetValue)}</span>
                 </div>
                 <input
                     id="optimizer-budget"
@@ -268,7 +263,7 @@ export default function OptimizePage() {
                     onTouchEnd={runOptimization}
                     onKeyUp={runOptimization}
                     aria-label="Security budget allocation"
-                    aria-valuetext={formatINR(budgetValue)}
+                    aria-valuetext={formatRupeesCompact(budgetValue)}
                 />
                 {error && <p className="font-body-sm text-body-sm text-error mt-stack-sm">{error}</p>}
             </div>
@@ -299,7 +294,7 @@ export default function OptimizePage() {
                     <div className={`flex items-center justify-between gap-stack-sm mb-stack-md px-3 py-2 rounded font-body-sm text-body-sm ${overBudget ? 'bg-error/10 text-error' : 'bg-surface-container-low text-on-surface-variant'}`}>
                         <span className="flex items-center gap-1.5">
                             <span aria-hidden="true" className="material-symbols-outlined text-[16px]">{overBudget ? 'warning' : 'info'}</span>
-                            {selected.length} control{selected.length === 1 ? '' : 's'} selected - {formatINR(manualCost)} of your {formatINR(budgetValue)} budget
+                            {selected.length} control{selected.length === 1 ? '' : 's'} selected - {formatRupeesCompact(manualCost)} of your {formatRupeesCompact(budgetValue)} budget
                         </span>
                         {overBudget && <span className="font-label-caps text-label-caps font-bold">Over budget</span>}
                     </div>
@@ -352,7 +347,7 @@ export default function OptimizePage() {
                                         </div>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <div className={`font-data-mono text-[13px] font-bold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(p.cost)}</div>
+                                        <div className={`font-data-mono text-[13px] font-bold tabular-nums ${included ? 'text-primary' : 'text-on-surface-variant'}`}>{formatRupeesCompact(p.cost)}</div>
                                     </div>
                                 </div>
                             </button>
@@ -380,7 +375,7 @@ export default function OptimizePage() {
                                 <span className="font-label-caps text-label-caps text-on-surface-variant uppercase">{kpi.label}</span>
                             </div>
                             <div className={`font-data-mono text-[28px] leading-[34px] font-bold tracking-tight tabular-nums ${kpi.tone}`}>
-                                {isLoading ? '–' : formatINR(kpi.value)}
+                                {isLoading ? '–' : formatRupeesCompact(kpi.value)}
                             </div>
                             <div className="font-body-sm text-body-sm text-on-surface-variant mt-unit">{kpi.caption}</div>
                         </div>
@@ -401,7 +396,7 @@ export default function OptimizePage() {
                                 dataKey="cost"
                                 type="number"
                                 domain={[0, 'dataMax']}
-                                tickFormatter={formatINR}
+                                tickFormatter={(v) => formatRupeesCompact(v)}
                                 fontSize={11}
                                 tickLine={false}
                                 axisLine={{ stroke: 'var(--outline-variant)' }}
@@ -409,7 +404,7 @@ export default function OptimizePage() {
                                 tickMargin={8}
                             />
                             <YAxis
-                                tickFormatter={formatINR}
+                                tickFormatter={(v) => formatRupeesCompact(v)}
                                 fontSize={11}
                                 tickLine={false}
                                 axisLine={false}
@@ -418,8 +413,8 @@ export default function OptimizePage() {
                                 tickMargin={4}
                             />
                             <Tooltip
-                                formatter={(v: number) => [formatINR(v), 'Cumulative reduction']}
-                                labelFormatter={(v: number) => `Cumulative cost: ${formatINR(v)}`}
+                                formatter={(v: number) => [formatRupeesCompact(v), 'Cumulative reduction']}
+                                labelFormatter={(v: number) => `Cumulative cost: ${formatRupeesCompact(v)}`}
                                 contentStyle={{ background: 'var(--surface-container-lowest)', border: '1px solid var(--outline-variant)', borderRadius: 8, fontSize: 12 }}
                             />
                             <Area
@@ -504,7 +499,7 @@ export default function OptimizePage() {
                                 <h3 className="font-title-lg text-title-lg text-primary">Three Ways to Spend the Same Budget</h3>
                                 <p className="font-body-sm text-body-sm text-on-surface-variant max-w-lg">
                                     Most teams triage by CVSS severity, or by what&apos;s actively being exploited (KEV/threat intel).
-                                    Here&apos;s what {formatINR(budgetValue)} actually buys under each approach, on this run&apos;s real
+                                    Here&apos;s what {formatRupeesCompact(budgetValue)} actually buys under each approach, on this run&apos;s real
                                     numbers - not a scripted example.
                                 </p>
                             </div>
@@ -531,8 +526,8 @@ export default function OptimizePage() {
                                         <span aria-hidden="true" className={`material-symbols-outlined text-[16px] ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.icon}</span>
                                         <span className={`font-label-caps text-label-caps ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{col.label}</span>
                                     </div>
-                                    <div className={`font-data-mono text-[22px] font-bold ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{formatINR(col.data.total_risk_reduced)}</div>
-                                    <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {col.data.selected_patches.length} controls, {formatINR(col.data.total_cost)} spent</div>
+                                    <div className={`font-data-mono text-[22px] font-bold ${col.highlight ? 'text-primary' : 'text-on-surface-variant'}`}>{formatRupeesCompact(col.data.total_risk_reduced)}</div>
+                                    <div className="font-body-sm text-body-sm text-on-surface-variant">risk reduced from {col.data.selected_patches.length} controls, {formatRupeesCompact(col.data.total_cost)} spent</div>
                                     {col.highlight && (
                                         <ul className="mt-stack-sm space-y-0.5">
                                             {col.data.selected_patches.map((id: string) => (
@@ -565,8 +560,8 @@ export default function OptimizePage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-stack-sm">
                     <p className="font-body-sm text-body-sm text-on-surface-variant max-w-lg">
                         {isOwn
-                            ? `Approving logs your ${selected.length}-control plan (${formatINR(totalCost)}) as a board-approved decision.`
-                            : `Approving logs the optimizer's ${selected.length}-control plan (${formatINR(totalCost)}) as a board-approved decision.`}
+                            ? `Approving logs your ${selected.length}-control plan (${formatRupeesCompact(totalCost)}) as a board-approved decision.`
+                            : `Approving logs the optimizer's ${selected.length}-control plan (${formatRupeesCompact(totalCost)}) as a board-approved decision.`}
                     </p>
                     <button
                         onClick={approveOptimizer}

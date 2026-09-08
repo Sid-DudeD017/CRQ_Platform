@@ -13,6 +13,7 @@ const AleTrendChart = dynamic(() => import('@/components/charts/AleTrendChart'),
     loading: () => <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />,
 });
 import { API_BASE, fetchWithRetry } from '@/lib/api';
+import { formatRupeesCr } from '@/lib/format';
 import { EmptyState, ErrorState } from '@/components/StatusMessage';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -213,7 +214,7 @@ function buildInsights(runs: SimRun[]): Insights | null {
 
     const lines: string[] = [];
     const tone: 'up' | 'down' | 'flat' = aleDelta < -1 ? 'down' : aleDelta > 1 ? 'up' : 'flat';
-    const aleCr = (v: number) => `₹${(v / 10000000).toFixed(2)} Cr`;
+    const aleCr = formatRupeesCr;
 
     if (tone === 'down') {
         lines.push(
@@ -604,7 +605,7 @@ export default function ReportsPage() {
                         <div>
                             <div className="font-label-caps text-label-caps text-on-surface-variant mb-1">Total Risk Accepted</div>
                             <div className="font-headline-md text-headline-md text-primary font-data-mono">
-                                {isLoading ? '–' : `₹${(totalRisk / 10000000).toFixed(2)} Cr`}
+                                {isLoading ? '–' : formatRupeesCr(totalRisk)}
                             </div>
                         </div>
                         <div>
@@ -752,13 +753,13 @@ export default function ReportsPage() {
                                                     {new Date(r.timestamp).toLocaleString()}
                                                 </td>
                                                 <td className="py-3 px-4 font-data-mono text-data-mono">
-                                                    {r.budget_used != null ? `₹${(r.budget_used / 10000000).toFixed(2)} Cr` : '—'}
+                                                    {r.budget_used != null ? formatRupeesCr(r.budget_used) : '—'}
                                                 </td>
                                                 <td className="py-3 px-4 font-data-mono text-data-mono font-bold">
-                                                    ₹{(r.expected_annual_loss / 10000000).toFixed(2)} Cr
+                                                    {formatRupeesCr(r.expected_annual_loss)}
                                                 </td>
                                                 <td className="py-3 px-4 font-data-mono text-data-mono">
-                                                    {r.var_95 != null ? `₹${(r.var_95 / 10000000).toFixed(2)} Cr` : '—'}
+                                                    {r.var_95 != null ? formatRupeesCr(r.var_95) : '—'}
                                                 </td>
                                                 <td className="py-3 px-4 font-data-mono text-data-mono">
                                                     {roi != null ? (
