@@ -91,6 +91,25 @@ export default function RiskSandbox({
     // to be set already.
     const { token } = useAuth();
 
+    // [Stale optimizer results after a budget drag - fix] "Optimized
+    // Cost" and every "Recommended" badge below come from simResults -
+    // the LAST completed Run Simulation call - not from wherever the
+    // budget slider happens to sit right now. Dragging the slider alone
+    // never re-runs the optimizer (that only happens on Run Simulation),
+    // so moving it to, say, Rs0 while a Rs88L run's results are still
+    // showing left the "Recommended"/"Optimized Cost" numbers looking
+    // like a live answer for Rs0 when they were actually computed for a
+    // completely different budget - confusing, and easy to mistake for a
+    // bug. This just detects that mismatch so the UI can say so instead
+    // of presenting stale numbers as current.
+    const currentBudgetRupees = (budget / 100) * 10000000;
+    const lastRunBudgetRupees = typeof simResults?.budget_used === 'number' ? simResults.budget_used : null;
+    const isOptimizerStale = lastRunBudgetRupees !== null && Math.abs(lastRunBudgetRupees - currentBudgetRupees) > 1000;
+    const formatRupees = (amount: number) => (
+        amount >= 10000000 ? `₹${(amount / 10000000).toFixed(2)} Cr` : `₹${(amount / 100000).toFixed(0)}L`
+    );
+
+
     // [Deploy-level polish] Replay the "pop up nicely" entrance animation
     // on every completed run without unmounting anything. A React `key`
     // remount used to do this but also tore down and rebuilt the Loss
@@ -227,6 +246,15 @@ export default function RiskSandbox({
           <h4 className="font-body-sm text-body-sm font-semibold">Strategic Controls</h4>
           {simResults?.optimization?.total_cost ? (
             <div className="flex items-center gap-2 flex-wrap justify-end">
+              {isOptimizerStale && (
+                <span
+                    className="flex items-center gap-1 px-2 py-1 bg-[#ca8a04]/10 text-[#ca8a04] rounded font-label-caps text-label-caps"
+                    title="You moved the budget slider after this optimizer result was computed - it still reflects the old budget. Click Run Simulation below to recompute it for the budget shown above."
+                >
+                    <span aria-hidden="true" className="material-symbols-outlined text-[14px]">history</span>
+                    From your last run at {formatRupees(lastRunBudgetRupees as number)}
+                </span>
+              )}
               <span className="font-label-caps text-label-caps text-on-surface-variant">
                 Optimized Cost: ₹{(Number(simResults.optimization.total_cost) / 100000).toFixed(1)}L
               </span>
@@ -255,8 +283,11 @@ export default function RiskSandbox({
         <div className="flex items-center gap-2">
         <span className="font-body-sm text-body-sm font-medium">{c.name}</span>
         {optimizerPicks && optimizerPicks.includes(c.name) && (
-            <span className="px-1.5 py-0.5 bg-[#15803d]/10 text-[#15803d] rounded font-label-caps text-label-caps flex items-center gap-0.5">
-                <span aria-hidden="true" className="material-symbols-outlined text-[12px]">auto_awesome</span>Recommended
+            <span
+                className={`px-1.5 py-0.5 rounded font-label-caps text-label-caps flex items-center gap-0.5 ${isOptimizerStale ? 'bg-[#ca8a04]/10 text-[#ca8a04]' : 'bg-[#15803d]/10 text-[#15803d]'}`}
+                title={isOptimizerStale ? `Recommended for your last run at ${formatRupees(lastRunBudgetRupees as number)} - not the current budget. Click Run Simulation to refresh.` : undefined}
+            >
+                <span aria-hidden="true" className="material-symbols-outlined text-[12px]">auto_awesome</span>{isOptimizerStale ? 'Recommended (stale)' : 'Recommended'}
             </span>
         )}
         </div>

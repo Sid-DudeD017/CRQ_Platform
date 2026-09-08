@@ -324,8 +324,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     this visitor is already authenticated. */}
                 <nav className="relative z-10 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
                     <Link href="/" onClick={goHome} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity" title="Go to the home page">
-                        <span className="w-8 h-8 rounded-md brand-gradient shrink-0" aria-hidden="true" />
-                        <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
+                        <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
                     </Link>
                     <div className="flex items-center gap-1 bg-surface-container-low border border-outline-variant rounded-full p-1">
                         <button

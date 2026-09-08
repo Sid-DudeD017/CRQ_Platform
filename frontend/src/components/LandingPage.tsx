@@ -39,8 +39,7 @@ export default function LandingPage({
             {/* Nav */}
             <nav className="relative z-10 flex items-center justify-between px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
                 <div className="flex items-center gap-2.5">
-                    <span className="w-8 h-8 rounded-md brand-gradient shrink-0" aria-hidden="true" />
-                    <span className="font-headline-sm text-headline-sm font-bold text-primary tracking-tight">CRQ Platform</span>
+                    <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
                 </div>
                 <div className="flex items-center gap-3">
                     <button
