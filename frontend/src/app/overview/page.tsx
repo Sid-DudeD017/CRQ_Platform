@@ -515,7 +515,7 @@ export default function ExecutiveDashboard() {
 <span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant flex items-center gap-1 whitespace-nowrap">
   <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-primary">policy</span> ISO 27001 | RBI | SEBI
 </span>
-<span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant whitespace-nowrap hidden sm:inline-flex">FY 2024</span>
+<span className="font-label-caps text-label-caps text-on-surface-variant px-2 py-1 bg-surface-container rounded border border-outline-variant whitespace-nowrap hidden sm:inline-flex">FY 2026</span>
 <button onClick={() => router.push('/reports')} className="border border-outline-variant text-on-surface bg-surface hover:bg-surface-container-low px-4 py-2 rounded font-body-sm text-body-sm flex items-center gap-2 transition-colors active:scale-95 whitespace-nowrap">
 <span aria-hidden="true" className="material-symbols-outlined text-[18px]">download</span> Export Report
                      </button>
