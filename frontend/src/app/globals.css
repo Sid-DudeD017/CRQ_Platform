@@ -319,12 +319,18 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role="button"]:focu
 .ambient-glow::before {
     top: -220px;
     left: -80px;
-    background: radial-gradient(circle, var(--secondary), transparent 70%);
+    /* [Sahay-style warm rebrand] was var(--secondary) (blue) - the app's
+       ambient hero glow now uses the same warm orange/amber the landing
+       page's heading gradient, CTA button, and stat colors already use,
+       instead of clashing with a cool blue blob behind a warm-toned page. */
+    background: radial-gradient(circle, #f59e0b, transparent 70%);
 }
 .ambient-glow::after {
     top: -260px;
     right: -120px;
-    background: radial-gradient(circle, var(--tertiary), transparent 70%);
+    /* [Sahay-style warm rebrand] was var(--tertiary) (green) - paired with
+       the amber blob above for a warm peach/gold glow instead of blue+green. */
+    background: radial-gradient(circle, #fbbf24, transparent 70%);
 }
 .dark .ambient-glow::before,
 .dark .ambient-glow::after {
@@ -333,8 +339,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role="button"]:focu
 
 /* Gradient brand mark - used for the logo/avatar squares instead of a
    flat fill, so the brand reads with a bit more depth/polish. */
+/* [Sahay-style warm rebrand] was a blue->green gradient (var(--secondary),
+   var(--tertiary)) - now matches the landing page's warm orange->olive-green
+   heading gradient so the logo mark reads consistently across every page. */
 .brand-gradient {
-    background: linear-gradient(135deg, var(--secondary), var(--tertiary));
+    background: linear-gradient(135deg, #f59e0b, #65a30d);
 }
 
 
@@ -378,6 +387,38 @@ a:focus-visible, button:focus-visible, input:focus-visible, [role="button"]:focu
     background: rgba(245, 158, 11, 0.14);
     color: #b45309;
 }
+
+/* [Sahay-style warm rebrand, part 2] The landing splash and authenticated
+   Home tab still sat on the app's neutral --background/--surface-container
+   tokens (used everywhere else - nav, modals, dashboards), which read as
+   flat gray/white next to Sahay's warm cream page and softly-tinted card.
+   These are scoped, opt-in classes applied ONLY to those specific
+   elements (not the shared tokens), so the rest of the app is untouched.
+   Dark mode falls back to the normal tokens rather than forcing a light
+   cream page onto a dark theme. */
+.landing-warm-page {
+    background: linear-gradient(180deg, #fffaf0 0%, #fffdf9 45%, #fef3e2 100%);
+}
+.dark .landing-warm-page {
+    background: var(--background);
+}
+.landing-warm-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(236, 253, 215, 0.55));
+    border-color: rgba(180, 83, 9, 0.16);
+}
+.dark .landing-warm-card {
+    background: var(--surface-container-lowest);
+    border-color: var(--outline-variant);
+}
+.landing-warm-band {
+    background: linear-gradient(180deg, rgba(254, 243, 199, 0.65), rgba(255, 251, 235, 0.25));
+    border-color: rgba(180, 83, 9, 0.14);
+}
+.dark .landing-warm-band {
+    background: var(--surface-container-low);
+    border-color: var(--outline-variant);
+}
+
 .dark .landing-nav-active {
     background: rgba(251, 191, 36, 0.18);
     color: #fbbf24;

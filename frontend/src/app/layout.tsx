@@ -7,8 +7,11 @@ import { ToastProvider } from "@/context/ToastContext";
 import { ErrorTrackerInit } from "@/lib/errorTracking";
 
 export const metadata: Metadata = {
-  title: "CRQ Platform Executive Dashboard",
+  title: "CRQ Platform",
   description: "AI-Powered Cyber Risk Quantification (CRQ) Platform",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

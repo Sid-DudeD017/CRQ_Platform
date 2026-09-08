@@ -349,7 +349,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 </nav>
 
                 {startTab === 'home' ? (
-                    <div className="animate-fade-scale-in">
+                    <div className="animate-fade-scale-in landing-warm-page">
                         {/* Hero */}
                         <section className="relative z-10 max-w-[1200px] mx-auto px-6 sm:px-10 pt-10 sm:pt-16 pb-16 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
                             <div>
@@ -370,7 +370,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                                 </div>
                             </div>
 
-                            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl p-gutter elevate">
+                            <div className="landing-warm-card border border-outline-variant rounded-xl shadow-2xl p-gutter elevate">
                                 <div className="flex flex-col gap-stack-md">
                                     {capabilities.map((c) => (
                                         <div key={c.title} className="flex items-start gap-3">
@@ -388,7 +388,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         </section>
 
                         {/* Stats */}
-                        <section className="relative z-10 border-y border-outline-variant bg-surface-container-low">
+                        <section className="relative z-10 border-y border-outline-variant landing-warm-band">
                             <div className="max-w-[1200px] mx-auto px-6 sm:px-10 py-10 grid grid-cols-1 sm:grid-cols-3 gap-8 text-center">
                                 {stats.map((s) => (
                                     <div key={s.label}>

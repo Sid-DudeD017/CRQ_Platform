@@ -33,7 +33,7 @@ export default function LandingPage({
     ];
 
     return (
-        <div className="relative min-h-screen bg-background text-on-background overflow-x-hidden">
+        <div className="relative min-h-screen landing-warm-page text-on-background overflow-x-hidden">
             <div className="ambient-glow" aria-hidden="true" />
 
             {/* Nav */}
@@ -83,7 +83,7 @@ export default function LandingPage({
                     </div>
                 </div>
 
-                <div className="bg-surface-container-lowest border border-outline-variant rounded-xl shadow-2xl p-gutter elevate">
+                <div className="landing-warm-card border border-outline-variant rounded-xl shadow-2xl p-gutter elevate">
                     <div className="flex flex-col gap-stack-md">
                         {capabilities.map((c) => (
                             <div key={c.title} className="flex items-start gap-3">
@@ -101,7 +101,7 @@ export default function LandingPage({
             </section>
 
             {/* Stats */}
-            <section className="relative z-10 border-y border-outline-variant bg-surface-container-low">
+            <section className="relative z-10 border-y border-outline-variant landing-warm-band">
                 <div className="max-w-[1200px] mx-auto px-6 sm:px-10 py-10 grid grid-cols-1 sm:grid-cols-3 gap-8 text-center">
                     {stats.map((s) => (
                         <div key={s.label}>
