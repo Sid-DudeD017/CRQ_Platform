@@ -92,7 +92,6 @@ o Support for generating evidence-based reports and dashboards for audits, regul
 
 • Reduction in both the likelihood and financial impact of cyber incidents through targeted remediation and investment strategies.
 
-hello friendsss.       
     
 
 
