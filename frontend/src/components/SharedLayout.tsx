@@ -305,7 +305,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         return (
             <div className="relative min-h-screen bg-background text-on-background overflow-x-hidden">
                 <div className="ambient-glow" aria-hidden="true" />
-                <nav className="relative z-10 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1400px] mx-auto">
+                <nav className="sticky top-0 z-20 bg-background/85 backdrop-blur-md border-b border-outline-variant/60 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1400px] mx-auto">
                     <Link href="/" onClick={goHome} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity" title="Go to the home page">
                         <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
                     </Link>
@@ -370,7 +370,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 {/* Nav - brand mark identical to the public landing page;
                     Login/Sign Up are replaced with Home/Dashboard tabs since
                     this visitor is already authenticated. */}
-                <nav className="relative z-10 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
+                <nav className="sticky top-0 z-20 bg-background/85 backdrop-blur-md border-b border-outline-variant/60 flex items-center justify-between flex-wrap gap-3 px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
                     <Link href="/" onClick={goHome} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity" title="Go to the home page">
                         <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
                     </Link>
@@ -406,8 +406,8 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                         {/* Hero */}
                         <section className="relative z-10 max-w-[1200px] mx-auto px-6 sm:px-10 pt-10 sm:pt-16 pb-16 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
                             <div>
-                                <h1 className="text-display-lg landing-font landing-heading-gradient tracking-tight mb-stack-md">
-                                    Welcome back{displayName ? `, ${displayName}` : ''}
+                                <h1 className="text-[58px] font-bold leading-[1.05] landing-font landing-heading-gradient tracking-tight mb-stack-md">
+                                    Welcome back{displayName ? <>, <span className="capitalize">{displayName}</span></> : ''}
                                 </h1>
                                 <p className="font-body-md text-body-md text-on-surface-variant mb-stack-lg max-w-md">
                                     An AI-powered platform that turns telemetry into Annualized Loss Expectancy, optimizes your security budget, and anchors every decision to a blockchain audit trail.
@@ -582,6 +582,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 surfaced closer to where they actually matter (the chat panel,
                 the Ledger page) rather than here, since the app still works
                 fine without either. */}
+            <div className="sticky top-0 z-50">
             {(backendUnreachable || serviceStatus?.database === 'error') && (
                 <div className="bg-error text-white px-4 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-body-sm text-body-sm text-center">
                     <span aria-hidden="true" className="material-symbols-outlined text-[18px]">cloud_off</span>
@@ -599,7 +600,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 </div>
             )}
             {/* TopNavBar */}
-            <nav className="bg-surface border-b border-outline-variant docked full-width top-0 z-50 shadow-[0_2px_12px_-6px_rgba(0,0,0,0.12)]">
+            <nav className="bg-surface border-b border-outline-variant w-full shadow-[0_2px_12px_-6px_rgba(0,0,0,0.12)]">
                 <div className="flex flex-wrap justify-between items-center gap-y-2 w-full px-4 sm:px-container-padding max-w-[1440px] mx-auto min-h-16 py-2">
                     <div className="flex items-center gap-stack-sm sm:gap-gutter">
                         <button
@@ -710,7 +711,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                 leave mobile visitors with no way to reach Investment,
                 Ledger, Ingestion, Training or Reports. */}
             {isMobileNavOpen && (
-                <div className="md:hidden bg-surface-container-low border-b border-outline-variant docked full-width z-40 shadow-lg animate-fade-scale-in">
+                <div className="md:hidden bg-surface-container-low border-b border-outline-variant w-full shadow-lg animate-fade-scale-in max-h-[calc(100vh-4rem)] overflow-y-auto">
                     <div className="p-gutter flex flex-col gap-unit max-w-[1440px] mx-auto w-full">
                         {/* [Weak mode identity - fix] The desktop badge above is
                             `hidden sm:inline-flex` - this is the mobile
@@ -804,6 +805,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
                     </div>
                 </div>
             </nav>
+            </div>
 
             {/* Main Content Wrapper */}
             <main className="flex-1 max-w-[1440px] mx-auto w-full p-container-padding bg-background relative">

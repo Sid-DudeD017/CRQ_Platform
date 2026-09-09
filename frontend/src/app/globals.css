@@ -271,6 +271,36 @@ input[type="range"]:hover::-moz-range-thumb { transform: scale(1.12); }
   background-color: var(--outline);
 }
 
+/* Regional Risk Exposure map (Intelligence page) - a real OpenStreetMap
+   tile layer with no API key/account/credit card required. There's no
+   free dark tile provider without one, so this approximates a dark
+   basemap by inverting + hue-rotating the tile pane only (markers, popups
+   and controls are excluded so they keep their real colors). */
+.regional-map-dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.25);
+}
+.regional-map-dark .leaflet-container {
+  background: #0a0a0a;
+  font-family: inherit;
+}
+.regional-map-dark .leaflet-popup-content-wrapper,
+.regional-map-dark .leaflet-tooltip {
+  background: #111827;
+  color: #f3f4f6;
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.regional-map-dark .leaflet-tooltip-top:before {
+  border-top-color: #111827;
+}
+.regional-map-dark .leaflet-control-attribution {
+  background: rgba(10, 10, 10, 0.7);
+  color: #a1a1aa;
+}
+.regional-map-dark .leaflet-control-attribution a {
+  color: #d4d4d8;
+}
+
 /* Visible, on-brand focus state for keyboard navigation - includes
    [role="button"] so custom interactive regions (e.g. the Ingestion
    Engine's drag-drop zone) get the same visible ring as real buttons

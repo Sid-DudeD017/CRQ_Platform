@@ -354,28 +354,28 @@ export default function IntelligencePage() {
 
             {/* Row 1: Regional exposure, ALE trend, blockchain trust */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
-                <div className={`${cardCls} lg:col-span-5 min-h-[360px]`}>
+                <div className={`${cardCls} lg:col-span-5 min-h-[420px]`}>
                     <div className="flex items-start justify-between mb-stack-sm">
-                        <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase">Regional Risk Exposure</h3>
+                        <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase">Regional Risk Exposure</h3>
                         <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-on-surface-variant">travel_explore</span>
                     </div>
                     {isAssetsLoading ? (
-                        <div className="flex-1 bg-surface-variant/20 rounded-lg animate-pulse min-h-[220px]" />
+                        <div className="flex-1 bg-surface-variant/20 rounded-lg animate-pulse min-h-[260px]" />
                     ) : assetsError ? (
                         <ErrorState title="Couldn't load regional exposure" whatHappened={assetsError} nextStep="Try refreshing." retrySafe onRetry={fetchAssets} />
                     ) : regionalExposure.length === 0 ? (
                         <EmptyState icon="location_off" title="No assets yet" description={`No ${dataSource === 'own' ? 'own-data' : 'demo'} assets found to place on the map.`} />
                     ) : (
-                        <div className="relative flex-1 min-h-[220px] rounded-lg overflow-hidden border border-outline-variant">
+                        <div className="relative flex-1 min-h-[260px] rounded-lg overflow-hidden border border-outline-variant">
                             <RegionalRiskMap regions={regionalExposure} maxValue={maxRegionValue} />
                         </div>
                     )}
                 </div>
 
-                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Annualized Loss Trend</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[420px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Annualized Loss Trend</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">ALE across your most recent simulation runs.</p>
-                    <div className="flex-1 min-h-[220px]">
+                    <div className="flex-1 min-h-[260px]">
                         {isSimLoading ? (
                             <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />
                         ) : simError ? (
@@ -415,10 +415,10 @@ export default function IntelligencePage() {
                     </div>
                 </div>
 
-                <div className={`${cardCls} lg:col-span-3 min-h-[360px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Decision Trust</h3>
+                <div className={`${cardCls} lg:col-span-3 min-h-[420px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Decision Trust</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">On-chain vs. database-only decisions.</p>
-                    <div className="flex-1 min-h-[220px]">
+                    <div className="flex-1 min-h-[260px]">
                         {isDecisionsLoading ? (
                             <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />
                         ) : decisionsError ? (
@@ -442,10 +442,10 @@ export default function IntelligencePage() {
 
             {/* Row 2: Business unit exposure, compliance coverage, decision activity, top units */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Exposure by Business Unit</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Exposure by Business Unit</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Total business value at risk per unit.</p>
-                    <div className="flex-1 min-h-[200px]">
+                    <div className="flex-1 min-h-[240px]">
                         {isAssetsLoading ? (
                             <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />
                         ) : assetsError ? (
@@ -466,10 +466,10 @@ export default function IntelligencePage() {
                     </div>
                 </div>
 
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Decisions Over Time</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Decisions Over Time</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Risk decisions logged per week.</p>
-                    <div className="flex-1 min-h-[200px]">
+                    <div className="flex-1 min-h-[240px]">
                         {isDecisionsLoading ? (
                             <div className="h-full w-full bg-surface-variant/20 rounded animate-pulse" />
                         ) : decisionsError ? (
@@ -496,11 +496,11 @@ export default function IntelligencePage() {
                     </div>
                 </div>
 
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Top Business Units by Exposure</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Top Business Units by Exposure</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Ranked by total business value at risk.</p>
                     {isAssetsLoading ? (
-                        <div className="flex-1 bg-surface-variant/20 rounded animate-pulse min-h-[200px]" />
+                        <div className="flex-1 bg-surface-variant/20 rounded animate-pulse min-h-[240px]" />
                     ) : assetsError ? (
                         <ErrorState title="Couldn't load business units" whatHappened={assetsError} nextStep="Try refreshing." retrySafe onRetry={fetchAssets} />
                     ) : businessUnitExposure.length === 0 ? (
@@ -525,10 +525,10 @@ export default function IntelligencePage() {
                 plus two illustrative widgets rounding out the page - not
                 backed by a CRQ metric, shown as fixed sample data. */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Compliance Coverage</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Compliance Coverage</h3>
                     <p className="font-body-sm text-body-sm text-on-surface-variant mb-stack-sm">Controls mapped to NIST CSF / ISO 27001 / CIS v8 that are active in your latest run.</p>
-                    <div className="flex-1 flex flex-col items-center justify-center min-h-[160px]">
+                    <div className="flex-1 flex flex-col items-center justify-center min-h-[180px]">
                         {isSimLoading ? (
                             <div className="h-16 w-16 rounded-full bg-surface-variant/20 animate-pulse" />
                         ) : simError ? (
@@ -549,8 +549,8 @@ export default function IntelligencePage() {
                     </div>
                 </div>
 
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Top Performing Districts</h3>
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Top Performing Districts</h3>
                     <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
                         {TOP_DISTRICTS_MOCK.map((r, idx) => (
                             <div key={r.city} className="flex items-center justify-between gap-2 py-1 border-b border-outline-variant last:border-0">
@@ -564,9 +564,9 @@ export default function IntelligencePage() {
                     </div>
                 </div>
 
-                <div className={`${cardCls} lg:col-span-4 min-h-[300px]`}>
-                    <h3 className="font-label-caps text-label-caps text-[#f59e0b] uppercase mb-1.5">Blockchain Activity</h3>
-                    <div className="flex-1 min-h-[200px]">
+                <div className={`${cardCls} lg:col-span-4 min-h-[360px]`}>
+                    <h3 className="font-label-caps text-[15px] font-bold tracking-wider leading-tight text-[#f59e0b] uppercase mb-2">Blockchain Activity</h3>
+                    <div className="flex-1 min-h-[240px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={BLOCKCHAIN_ACTIVITY_MOCK} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                                 <defs>

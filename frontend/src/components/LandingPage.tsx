@@ -37,7 +37,7 @@ export default function LandingPage({
             <div className="ambient-glow" aria-hidden="true" />
 
             {/* Nav */}
-            <nav className="relative z-10 flex items-center justify-between px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
+            <nav className="sticky top-0 z-20 bg-background/85 backdrop-blur-md border-b border-outline-variant/60 flex items-center justify-between px-6 sm:px-10 py-5 max-w-[1200px] mx-auto">
                 <div className="flex items-center gap-2.5">
                     <img src="/suraksha-logo.png" alt="CRQ Platform" className="h-10 w-auto shrink-0" />
                 </div>
