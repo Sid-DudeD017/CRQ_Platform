@@ -1,6 +1,6 @@
 # Project Presentation
 
-- **PPT:** [SecureX_SIH2026_Presenation.pdf]()
+- **PPT:** [SecureX_SIH2026_Presentation.pdf](/submission/SecureX_SIH2026_Presenation.pdf)
 
 ## External presentation link (only if needed)
 
