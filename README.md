@@ -10,7 +10,7 @@ This repository follows the SIH 2026 project submission structure. Source code l
 
 ## 1. Project Information
 
-- **Project Title:** CRQ Platform — AI-Powered Cyber Risk Quantification
+- **Project Title:** Suraksha — AI-Powered Cyber Risk Quantification Platform
 - **PS ID:** `SIH26105`
 - **PS Title:** `AI-Powered Continuous Cyber Risk Quantification and Investment Optimization Platform`
 - **Category:** Software
@@ -76,15 +76,34 @@ CRQ_Platform/
 
 ## 8. Final Presentation
 
-Upload the final PPT/PPTX to the `submission/` folder when the file size is suitable for GitHub — see [submission/PRESENTATION.md](submission/PRESENTATION.md). If it's too large, share a viewer link there instead.
+📊 **[Open the final presentation — SecureX_SIH2026_Presentation.pdf](submission/SecureX_SIH2026_Presentation.pdf)**
+
+See [submission/PRESENTATION.md](submission/PRESENTATION.md) for an external (Google Drive) viewer link as a backup.
 
 ## 9. Demo Video
 
-See [submission/DEMO.md](submission/DEMO.md) for the demo video link and what it covers.
+🎬 **[Watch the demo video](https://youtu.be/kbBLLaTVeQk)**
+
+See [submission/DEMO.md](submission/DEMO.md) for details.
 
 ## 10. Screenshots / Prototype Photos
 
-See [assets/screenshots/](assets/screenshots/README.md) for the recommended screenshot list and naming convention.
+| | |
+|---|---|
+| **Login** | **Overview (Demo dashboard)** |
+| ![Login](assets/screenshots/Login.png) | ![Overview](assets/screenshots/Overview.png) |
+| **Ingestion Engine (Own Data)** | **Investment Optimiser** |
+| ![Ingestion Engine](<assets/screenshots/Ingestion Engine.png>) | ![Investment Optimiser](<assets/screenshots/Investment Optimiser.png>) |
+| **Ledger** | **Calibration** |
+| ![Ledger](assets/screenshots/Ledger.png) | ![Calibration](assets/screenshots/Calibration.png) |
+| **Reports** | **Training — Platform Navigation Guide** |
+| ![Reports](assets/screenshots/Reports.png) | ![Training - Platform Navigation Guide](<assets/screenshots/Training - Platform Navigation Guide.png>) |
+
+**CRQ Intelligence — rollup view**
+
+![CRQ Intelligence rollup view](<assets/screenshots/CRQ Intelligence rollup view.png>)
+
+More screenshots and the naming convention: [assets/screenshots/](assets/screenshots/README.md).
 
 ## 11. Installation
 
