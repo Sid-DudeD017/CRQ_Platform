@@ -11,12 +11,12 @@ This repository follows the SIH 2026 project submission structure. Source code l
 ## 1. Project Information
 
 - **Project Title:** CRQ Platform — AI-Powered Cyber Risk Quantification
-- **PS ID:** `<PS_ID>`
-- **PS Title:** `<PS_TITLE>`
+- **PS ID:** `<SIH26105>`
+- **PS Title:** `<AI-Powered Continuous Cyber Risk Quantification and Investment Optimization Platform>`
 - **Category:** Software
-- **Theme:** `<THEME>`
-- **Team Name:** `<TEAM_NAME>`
-- **Team Members:** `<TEAM_MEMBER_1>`, `<TEAM_MEMBER_2>`, `<TEAM_MEMBER_3>`, `<TEAM_MEMBER_4>`, `<TEAM_MEMBER_5>`, `<TEAM_MEMBER_6>`
+- **Theme:** `<Blockchain & Cybersecurity>`
+- **Team Name:** `<SecureX>`
+- **Team Members:** `<Siddharth Bhakta>`, `<Raghav Gupta>`, `<Shubhika>`, `<Shreeyansh Singh Sajwan>`, `<Vivek Phogat>`, `<Dushyant>`
 
 ## 2. Problem Statement
 
