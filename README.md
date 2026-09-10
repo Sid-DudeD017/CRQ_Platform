@@ -1,4 +1,4 @@
-# 🛡️ CRQ Platform — AI-Powered Cyber Risk Quantification
+# Suraksha — Cyber Risk Quantification Platform
 
 [![GitHub](https://img.shields.io/badge/GitHub-Sid--DudeD017%2FCRQ__Platform-blue?logo=github)](https://github.com/Sid-DudeD017/CRQ_Platform)
 [![CI](https://github.com/Sid-DudeD017/CRQ_Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Sid-DudeD017/CRQ_Platform/actions/workflows/ci.yml)
